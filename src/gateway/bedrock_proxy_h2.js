@@ -218,13 +218,17 @@ function forwardToTenantRouter(channel, userId, message) {
 
 /**
  * Fire-and-forget: trigger Tenant Router to start microVM prewarming.
+ * Uses a lightweight warmup message instead of the user's actual message
+ * to avoid polluting OpenClaw's conversation history with a "ghost" message.
  * Does not wait for response. Errors are logged and swallowed.
  */
-function prewarmTenantRouter(channel, userId, message) {
+const WARMUP_MESSAGE = '[SYSTEM] Session warmup - please respond with OK';
+
+function prewarmTenantRouter(channel, userId) {
   const tenantKey = getTenantKey(channel, userId);
   log(`Prewarming microVM for ${tenantKey}`);
 
-  forwardToTenantRouter(channel, userId, message)
+  forwardToTenantRouter(channel, userId, WARMUP_MESSAGE)
     .then(() => {
       setTenantStatus(tenantKey, 'warm');
       log(`Prewarm complete: ${tenantKey} -> warm`);
@@ -306,8 +310,9 @@ async function routeRequest(channel, userId, userText) {
   // --- Cold: first request for this tenant ---
   setTenantStatus(tenantKey, 'warming');
 
-  // Async: trigger microVM prewarm (fire-and-forget)
-  prewarmTenantRouter(channel, userId, userText);
+  // Async: trigger microVM prewarm with lightweight warmup message (fire-and-forget)
+  // Uses a system message instead of user's actual message to avoid ghost conversation history
+  prewarmTenantRouter(channel, userId);
 
   // Sync: fast-path direct Bedrock call (~2-3s)
   const fastText = await fastPathBedrock(userText);
