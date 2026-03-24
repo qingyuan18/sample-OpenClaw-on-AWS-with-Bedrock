@@ -469,3 +469,37 @@ export function useRoutingRules() {
     queryFn: () => api.get('/routing/rules'),
   });
 }
+
+// === IM User Mappings ===
+
+export interface UserMapping {
+  channel: string;
+  channelUserId: string;
+  employeeId: string;
+  ssmPath?: string;
+}
+
+export function useUserMappings() {
+  return useQuery<UserMapping[]>({
+    queryKey: ['user-mappings'],
+    queryFn: () => api.get('/bindings/user-mappings'),
+  });
+}
+
+export function useCreateUserMapping() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { channel: string; channelUserId: string; employeeId: string }) =>
+      api.post<{ saved: boolean }>('/bindings/user-mappings', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['user-mappings'] }),
+  });
+}
+
+export function useDeleteUserMapping() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { channel: string; channelUserId: string }) =>
+      api.del<{ deleted: boolean }>(`/bindings/user-mappings?channel=${data.channel}&channelUserId=${data.channelUserId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['user-mappings'] }),
+  });
+}

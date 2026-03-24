@@ -609,7 +609,116 @@ def get_bindings(authorization: str = Header(default="")):
 def create_binding(body: dict):
     body.setdefault("status", "active")
     body.setdefault("createdAt", datetime.now(timezone.utc).isoformat())
+    # If channel user ID provided, write SSM mapping
+    channel_user_id = body.get("channelUserId", "")
+    channel = body.get("channel", "")
+    employee_id = body.get("employeeId", "")
+    if channel_user_id and channel and employee_id:
+        _write_user_mapping(channel, channel_user_id, employee_id)
     return db.create_binding(body)
+
+
+# =========================================================================
+# IM User → Employee Mapping (SSM-backed)
+# =========================================================================
+
+import boto3 as _boto3_main
+
+def _ssm_client():
+    return _boto3_main.client("ssm", region_name=os.environ.get("SSM_REGION", os.environ.get("AWS_REGION", "us-east-1")))
+
+def _mapping_prefix():
+    stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+    return f"/openclaw/{stack}/user-mapping/"
+
+def _write_user_mapping(channel: str, channel_user_id: str, employee_id: str):
+    """Write SSM mapping: channel__user_id → employee_id"""
+    key = f"{channel}__{channel_user_id}"
+    path = f"{_mapping_prefix()}{key}"
+    try:
+        _ssm_client().put_parameter(Name=path, Value=employee_id, Type="String", Overwrite=True)
+    except Exception as e:
+        print(f"[user-mapping] SSM write failed: {e}")
+
+def _read_user_mapping(channel: str, channel_user_id: str) -> str:
+    """Read SSM mapping: channel__user_id → employee_id"""
+    key = f"{channel}__{channel_user_id}"
+    path = f"{_mapping_prefix()}{key}"
+    try:
+        resp = _ssm_client().get_parameter(Name=path)
+        return resp["Parameter"]["Value"]
+    except Exception:
+        return ""
+
+def _list_user_mappings() -> list:
+    """List all user mappings from SSM."""
+    prefix = _mapping_prefix()
+    try:
+        ssm = _ssm_client()
+        mappings = []
+        params = {"Path": prefix, "Recursive": True, "MaxResults": 50}
+        while True:
+            resp = ssm.get_parameters_by_path(**params)
+            for p in resp.get("Parameters", []):
+                name = p["Name"].replace(prefix, "")
+                parts = name.split("__", 1)
+                if len(parts) == 2:
+                    mappings.append({
+                        "channel": parts[0],
+                        "channelUserId": parts[1],
+                        "employeeId": p["Value"],
+                        "ssmPath": p["Name"],
+                    })
+            token = resp.get("NextToken")
+            if not token:
+                break
+            params["NextToken"] = token
+        return mappings
+    except Exception as e:
+        print(f"[user-mapping] SSM list failed: {e}")
+        return []
+
+@app.get("/api/v1/bindings/user-mappings")
+def get_user_mappings():
+    """List all IM user → employee mappings from SSM."""
+    return _list_user_mappings()
+
+class UserMappingRequest(BaseModel):
+    channel: str       # discord, telegram, slack, whatsapp
+    channelUserId: str  # platform-specific user ID
+    employeeId: str     # emp-carol, emp-w5, etc.
+
+@app.post("/api/v1/bindings/user-mappings")
+def create_user_mapping(body: UserMappingRequest):
+    """Create or update an IM user → employee mapping in SSM."""
+    _write_user_mapping(body.channel, body.channelUserId, body.employeeId)
+    # Also write position mapping for the tenant_id that H2 Proxy derives
+    emp = next((e for e in db.get_employees() if e["id"] == body.employeeId), None)
+    if emp:
+        pos_id = emp.get("positionId", "")
+        if pos_id:
+            # Write position for various tenant_id formats the proxy might derive
+            stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
+            ssm = _ssm_client()
+            for tenant_key in [body.employeeId, f"{body.channel}__{body.channelUserId}"]:
+                try:
+                    ssm.put_parameter(
+                        Name=f"/openclaw/{stack}/tenants/{tenant_key}/position",
+                        Value=pos_id, Type="String", Overwrite=True)
+                except Exception:
+                    pass
+    return {"saved": True, "channel": body.channel, "channelUserId": body.channelUserId, "employeeId": body.employeeId}
+
+@app.delete("/api/v1/bindings/user-mappings")
+def delete_user_mapping(channel: str, channelUserId: str):
+    """Delete an IM user → employee mapping from SSM."""
+    key = f"{channel}__{channelUserId}"
+    path = f"{_mapping_prefix()}{key}"
+    try:
+        _ssm_client().delete_parameter(Name=path)
+        return {"deleted": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # =========================================================================

@@ -136,12 +136,44 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
         logger.info("First invocation for tenant %s — assembling workspace", tenant_id)
 
         # Extract base employee ID for S3 paths
+        # Tenant ID formats:
+        #   port__emp-carol__bbee1f93  → base = emp-carol (Portal, 3 parts)
+        #   tg__emp-w5__a1b2c3d4      → base = emp-w5 (Telegram, 3 parts)
+        #   unknown__1484960930608578580 → base = 1484960930608578580 (Discord via H2 Proxy, 2 parts)
+        #   actions__a                 → base = a (H2 Proxy fallback, 2 parts)
+        #   emp-carol                  → base = emp-carol (direct)
         base_id = tenant_id
         parts = tenant_id.split("__")
         if len(parts) >= 3:
+            # channel__user_id__hash → take user_id (middle)
             base_id = parts[1]
-        elif len(parts) == 2 and len(parts[1]) > 10:
-            base_id = parts[0]
+        elif len(parts) == 2:
+            # channel__user_id → take user_id (second part, the actual identifier)
+            base_id = parts[1]
+
+        # Check SSM user-mapping for IM channel user IDs
+        # e.g., discord__1460888812426363004 → emp-carol
+        if not base_id.startswith("emp-"):
+            try:
+                import boto3 as _b3_mapping
+                ssm = _b3_mapping.client("ssm", region_name=AWS_REGION_RUNTIME)
+                # Try multiple mapping key formats
+                mapping_keys = [
+                    f"{parts[0]}__{base_id}" if len(parts) >= 2 else base_id,  # channel__userId
+                    base_id,  # just userId
+                    tenant_id,  # full tenant_id
+                ]
+                for mapping_key in mapping_keys:
+                    try:
+                        resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/user-mapping/{mapping_key}")
+                        resolved = resp["Parameter"]["Value"]
+                        logger.info("SSM user-mapping resolved: %s → %s", mapping_key, resolved)
+                        base_id = resolved
+                        break
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning("SSM user-mapping lookup failed: %s", e)
 
         # 1. Sync tenant's personal workspace from S3 using BASE ID
         s3_base = f"s3://{S3_BUCKET}/{base_id}"
@@ -480,6 +512,16 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
             parts = tenant_id.split("__")
             if len(parts) >= 3:
                 base_id = parts[1]
+            elif len(parts) == 2:
+                base_id = parts[1]
+            # Use resolved base_id from workspace assembly if available
+            try:
+                with open("/tmp/base_tenant_id") as f:
+                    resolved = f.read().strip()
+                    if resolved and resolved != "unknown":
+                        base_id = resolved
+            except Exception:
+                pass
             threading.Thread(
                 target=_write_usage_to_dynamodb,
                 args=(tenant_id, base_id, usage, model, duration_ms),

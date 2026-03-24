@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Link2, Plus, Users, User, GitBranch } from 'lucide-react';
+import { Link2, Plus, Users, User, GitBranch, Smartphone, Trash2 } from 'lucide-react';
 import { Card, StatCard, Badge, Button, PageHeader, Table, Modal, Select, Tabs, StatusDot } from '../components/ui';
-import { useBindings, useEmployees, useAgents, usePositions, useCreateBinding, useBulkProvision, useRoutingRules } from '../hooks/useApi';
+import { useBindings, useEmployees, useAgents, usePositions, useCreateBinding, useBulkProvision, useRoutingRules, useUserMappings, useCreateUserMapping, useDeleteUserMapping } from '../hooks/useApi';
 import { CHANNEL_LABELS } from '../types';
 import type { Binding, ChannelType } from '../types';
 
@@ -13,8 +13,15 @@ export default function Bindings() {
   const createBinding = useCreateBinding();
   const bulkProvision = useBulkProvision();
   const { data: routingRules = [] } = useRoutingRules();
+  const { data: userMappings = [] } = useUserMappings();
+  const createUserMapping = useCreateUserMapping();
+  const deleteUserMapping = useDeleteUserMapping();
   const [showCreate, setShowCreate] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
+  const [showMapping, setShowMapping] = useState(false);
+  const [mapChannel, setMapChannel] = useState('discord');
+  const [mapUserId, setMapUserId] = useState('');
+  const [mapEmpId, setMapEmpId] = useState('');
   const [bulkPos, setBulkPos] = useState('');
   const [bulkChannel, setBulkChannel] = useState('slack');
   const [bulkResult, setBulkResult] = useState<any>(null);
@@ -80,6 +87,7 @@ export default function Bindings() {
             { id: 'shared', label: 'N:1 Shared', count: shared.length },
             { id: 'multi', label: '1:N Multi-Agent', count: multi.length },
             { id: 'routing', label: 'Routing Rules', count: routingRules.length },
+            { id: 'mappings', label: 'IM User Mappings', count: userMappings.length },
           ]}
           activeTab={activeTab}
           onChange={setActiveTab}
@@ -107,6 +115,36 @@ export default function Bindings() {
                 ]}
                 data={routingRules}
               />
+            </div>
+          ) : activeTab === 'mappings' ? (
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm text-text-secondary">Map IM platform user IDs to employee IDs. This tells the system which employee is behind each Discord/Telegram/Slack/WhatsApp account.</p>
+                <Button variant="primary" onClick={() => setShowMapping(true)}><Smartphone size={14} className="mr-1" /> Add Mapping</Button>
+              </div>
+              {userMappings.length === 0 ? (
+                <div className="text-center py-8 text-text-muted">
+                  <Smartphone size={32} className="mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No IM user mappings configured yet.</p>
+                  <p className="text-xs mt-1">Add mappings so the system knows which employee is behind each IM account.</p>
+                </div>
+              ) : (
+                <Table
+                  columns={[
+                    { key: 'channel', label: 'Channel', render: (r: typeof userMappings[0]) => <Badge color="info">{r.channel}</Badge> },
+                    { key: 'channelUserId', label: 'Platform User ID', render: (r: typeof userMappings[0]) => <code className="text-xs bg-dark-bg px-2 py-0.5 rounded">{r.channelUserId}</code> },
+                    { key: 'employeeId', label: 'Employee', render: (r: typeof userMappings[0]) => {
+                      const emp = EMPLOYEES.find(e => e.id === r.employeeId);
+                      return <span className="font-medium">{emp?.name || r.employeeId}</span>;
+                    }},
+                    { key: 'actions', label: '', render: (r: typeof userMappings[0]) => (
+                      <button onClick={() => deleteUserMapping.mutate({ channel: r.channel, channelUserId: r.channelUserId })}
+                        className="text-text-muted hover:text-danger transition-colors"><Trash2 size={14} /></button>
+                    )},
+                  ]}
+                  data={userMappings}
+                />
+              )}
             </div>
           ) : (
             <Table columns={columns} data={tabData[activeTab] || []} />
@@ -241,6 +279,40 @@ export default function Bindings() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* IM User Mapping Modal */}
+      <Modal
+        open={showMapping} onClose={() => { setShowMapping(false); setMapChannel('discord'); setMapUserId(''); setMapEmpId(''); }}
+        title="Add IM User Mapping"
+        footer={<div className="flex justify-end gap-3">
+          <Button variant="default" onClick={() => setShowMapping(false)}>Cancel</Button>
+          <Button variant="primary" disabled={!mapUserId || !mapEmpId || createUserMapping.isPending} onClick={() => {
+            createUserMapping.mutate({ channel: mapChannel, channelUserId: mapUserId, employeeId: mapEmpId }, {
+              onSuccess: () => { setShowMapping(false); setMapChannel('discord'); setMapUserId(''); setMapEmpId(''); },
+            });
+          }}>{createUserMapping.isPending ? 'Saving...' : 'Save Mapping'}</Button>
+        </div>}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-text-secondary">Map an IM platform user ID to an employee. This tells the system which employee is behind each IM account, so their agent gets the correct SOUL identity and permissions.</p>
+          <Select label="IM Channel" value={mapChannel} onChange={setMapChannel} options={[
+            { label: 'Discord', value: 'discord' },
+            { label: 'Telegram', value: 'telegram' },
+            { label: 'Slack', value: 'slack' },
+            { label: 'WhatsApp', value: 'whatsapp' },
+          ]} />
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Platform User ID</label>
+            <input value={mapUserId} onChange={e => setMapUserId(e.target.value)}
+              placeholder="e.g. 1460888812426363004 (Discord) or 987654321 (Telegram)"
+              className="w-full rounded-lg border border-dark-border bg-dark-bg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:outline-none" />
+            <p className="text-xs text-text-muted mt-1">Find this in the IM platform's user profile or from the pairing log.</p>
+          </div>
+          <Select label="Employee" value={mapEmpId} onChange={setMapEmpId}
+            options={EMPLOYEES.map(e => ({ label: `${e.name} (${e.positionName})`, value: e.id }))}
+            placeholder="Select employee" />
+        </div>
       </Modal>
     </div>
   );
