@@ -1195,6 +1195,13 @@ def get_playground_profiles():
             plan_a += f"\nDENY: {', '.join(blocked)}."
         plan_e = "Block PII (SSN, credit cards, phone numbers). Block credential exposure."
         profiles[tenant_id] = {"role": role, "tools": tools, "planA": plan_a, "planE": plan_e}
+    # Always include admin profile for the floating assistant
+    profiles["port__admin"] = {
+        "role": "it_admin",
+        "tools": ["web_search", "shell", "browser", "file", "file_write", "code_execution"],
+        "planA": "ALLOW: all tools. Full IT Admin access.\nThis is the Admin Assistant running on the Gateway EC2.",
+        "planE": "Block credential exposure in responses.",
+    }
     return profiles
 
 @app.post("/api/v1/playground/send")

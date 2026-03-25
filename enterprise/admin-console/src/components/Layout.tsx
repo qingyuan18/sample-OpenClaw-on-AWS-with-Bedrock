@@ -10,6 +10,7 @@ import { useApprovals, useAlertRules, useAgents, useEmployees } from '../hooks/u
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import ClawForgeLogo from './ClawForgeLogo';
+import AdminAssistant from './AdminAssistant';
 import clsx from 'clsx';
 
 interface NavItem {
@@ -284,6 +285,9 @@ export default function Layout({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
+
+      {/* Floating Admin Assistant */}
+      <AdminAssistant />
     </div>
   );
 }
