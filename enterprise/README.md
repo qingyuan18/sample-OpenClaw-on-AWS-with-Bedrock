@@ -4,10 +4,69 @@ Turn [OpenClaw](https://github.com/openclaw/openclaw) from a personal AI assista
 
 ---
 
+## Serverless Economics: ~97% Cheaper Than Dedicated EC2
+
+Most enterprise AI deployments either charge per seat or run dedicated compute per employee. AgentCore Firecracker microVMs change the economics entirely — agents **scale to zero between conversations**, so you only pay for the seconds an agent is actually responding.
+
+| | Dedicated EC2 per Employee | ChatGPT Team | **OpenClaw on AgentCore** |
+|---|---|---|---|
+| 50 employees | 50 × $52 = $2,600/mo | 50 × $25 = $1,250/mo | **~$65/mo** |
+| Per person / month | $52 | $25 | **~$1.30** |
+| Savings | — | — | **~97% vs EC2 · ~95% vs ChatGPT** |
+
+One gateway EC2 ($52/mo) serves your entire organization. Every other agent is serverless — no idle cost.
+
+---
+
+## Elastic Capacity: ~6s Activation, Scales to Zero
+
+| | Behavior |
+|-|---------|
+| **Cold start** | ~6s — Firecracker microVM spins up, SOUL assembled, Bedrock responds |
+| **Warm session** | Near-instant — session stays active during a conversation |
+| **Idle cost** | Zero — microVM terminates between conversations, nothing to pay |
+| **Always-on agents** | 0ms cold start — assign high-traffic agents (help desk, HR bot) to persistent Docker mode |
+| **Per-agent standby** | Configure from Agent Factory → Shared Agents tab. No infrastructure change needed |
+
+Personal employee agents spin up on demand. Shared team agents pin as always-on Docker containers. Your infrastructure matches actual usage — not the worst-case headroom you'd provision for EC2.
+
+---
+
+## Security: Hardware-Level Isolation at Every Layer
+
+Every agent invocation runs in an isolated Firecracker microVM — the same hypervisor technology powering AWS Lambda. No amount of prompt engineering can break L3 or L4.
+
+| Layer | Mechanism | Bypassed by prompt injection? |
+|-------|-----------|-------------------------------|
+| L1 — Prompt | SOUL.md rules ("Finance never uses shell") | ⚠️ Theoretically possible |
+| L2 — Application | Skills manifest `allowedRoles`/`blockedRoles` | ⚠️ Code bug risk |
+| **L3 — IAM** | **Runtime role has no permission on target resource** | **Impossible** |
+| **L4 — Compute** | **Firecracker microVM per invocation, isolated at hypervisor level** | **Impossible** |
+
+Each runtime tier has its own Docker image, its own IAM role, and its own Firecracker boundary. An intern's agent IAM role literally cannot read the exec S3 bucket — even if the LLM tries.
+
+Additional controls: no public ports (SSM only) · IAM roles throughout, no hardcoded credentials · gateway token in SSM SecureString, never on disk · VPC isolation between runtimes.
+
+---
+
+## Auditable and Governed from Day One
+
+| Control | What IT Gets |
+|---------|-------------|
+| **SOUL Editor** | Global rules locked by IT. Finance cannot touch shell. Engineering cannot leak PII. Employees cannot override the global layer. |
+| **Skill Governance** | 26 skills with `allowedRoles`/`blockedRoles`. Employees cannot install unapproved skills. |
+| **Audit Center** | Every invocation, tool call, permission denial, SOUL change, and IM pairing → DynamoDB |
+| **Usage & Cost** | Per-employee, per-department breakdown. Daily/weekly/monthly trends with model pricing |
+| **IM Management** | Every employee's connected IM accounts visible to admin. One-click revoke. |
+| **Security Center** | Live ECR images, IAM roles, VPC security groups with AWS Console deep links |
+| **RBAC** | Admin (full org) · Manager (department-scoped) · Employee (portal only) |
+
+---
+
 ## What Makes This Different
 
 > Most enterprise AI platforms give everyone the same generic assistant.
-> This one gives each employee **a personal AI agent with their own identity, memory, tools, and boundaries** — and gives IT full governance control from a single console.
+> This one gives each employee **a personal AI agent with their own identity, memory, tools, and boundaries** — while giving IT the governance controls above.
 
 ### Flagship Features
 
@@ -18,7 +77,7 @@ Turn [OpenClaw](https://github.com/openclaw/openclaw) from a personal AI assista
 | **Three-Layer SOUL** | Global (IT) → Position (dept admin) → Personal (employee). 3 stakeholders, 3 layers, one merged identity. Same LLM — Finance Analyst vs SDE have completely different personalities and permissions |
 | **Self-Service IM Pairing** | Employee scans QR code from Portal → connects Telegram / Feishu / Discord in 30 seconds. No IT ticket, no admin approval |
 | **Multi-Runtime Architecture** | Standard tier (Nova 2 Lite, scoped IAM) vs Executive tier (Claude Sonnet 4.6, full access). Different Docker images, different models, different IAM roles — infrastructure-level isolation |
-| **Org Directory KB** | Auto-generated company directory (every employee, R&R, contact, agent capabilities) injected into every agent — agents know who to contact and can draft messages for you |
+| **Org Directory KB** | Company directory (every employee, R&R, contact, agent capabilities) seeded from org data and injected into every agent — agents know who to contact and can draft messages for you |
 | **Position → Runtime Routing** | 3-tier routing chain: employee override → position rule → default. Assign positions to runtimes from Security Center UI, propagates to all members automatically |
 | **Per-Employee Model Config** | Override model, context window, compaction settings, and response language at position OR employee level from Agent Factory → Configuration tab |
 | **IM Channel Management** | Admin sees every employee's IM connections grouped by channel — when they paired, session count, last active, one-click disconnect |
@@ -187,7 +246,7 @@ When an agent starts a new session, `workspace_assembler` injects:
 2. **Position KB** (Engineering docs for SAs, Finance docs for FAs) — scoped by role
 3. **Employee KB** — individual overrides
 
-The org directory KB (auto-generated from the Admin Console) gives every agent the ability to answer: *"Who should I contact for X?"* and *"How do I reach [name]?"*
+The org directory KB (seeded via `seed_knowledge_docs.py`, refreshed by re-running the script after org changes) gives every agent the ability to answer: *"Who should I contact for X?"* and *"How do I reach [name]?"*
 
 ## Architecture
 
@@ -290,7 +349,7 @@ Zero IT friction. Employees self-service in 30 seconds. Admins see all connectio
 | **Permission Control** | SOUL.md defines allowed/blocked tools per role. Plan A (pre-execution) + Plan E (post-audit). Exec profile bypasses Plan A entirely |
 | **Multi-Runtime** | Standard (Nova 2 Lite, scoped IAM) and Executive (Sonnet 4.6, full IAM) runtimes. Assign positions to runtimes from Security Center UI |
 | **Self-service IM Pairing** | QR code scan + `/start TOKEN` → SSM mapping written instantly. Supports Telegram, Feishu, Discord |
-| **Org Directory KB** | Auto-generated from DynamoDB employee data. Injected into every agent's workspace. Agents know who to contact for what |
+| **Org Directory KB** | Seeded from org data via `seed_knowledge_docs.py`. Injected into every agent's workspace. Agents know who to contact for what |
 | **Per-employee Config** | Override model, `recentTurnsPreserve`, `maxTokens`, response language at position OR employee level. Zero redeploy |
 | **Position → Runtime Routing** | 3-tier: employee SSM override → position SSM rule → default. UI in Security Center assigns positions |
 | **Memory Persistence** | Three-layer: per-turn S3 checkpoint + SIGTERM flush + Gateway compaction. Cross-channel (IM + Portal share same S3 path) |
@@ -345,6 +404,7 @@ Creates: EC2 (gateway) · ECR (agent image) · S3 (workspaces) · IAM roles · A
 STACK_NAME="openclaw-multitenancy"
 REGION="us-east-1"
 DYNAMODB_REGION="us-east-2"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --region $REGION \
   --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' --output text)
@@ -389,6 +449,7 @@ python3 seed_settings.py         --region $DYNAMODB_REGION
 python3 seed_audit_approvals.py  --region $DYNAMODB_REGION
 python3 seed_usage.py            --region $DYNAMODB_REGION
 python3 seed_routing_conversations.py --region $DYNAMODB_REGION
+python3 seed_knowledge.py        --region $DYNAMODB_REGION
 python3 seed_ssm_tenants.py --region $REGION --stack $STACK_NAME
 
 export S3_BUCKET=$S3_BUCKET
@@ -412,10 +473,12 @@ aws ssm send-command --instance-ids $INSTANCE_ID --region $REGION \
   --document-name AWS-RunShellScript \
   --parameters "{\"commands\":[
     \"python3 -m venv /opt/admin-venv\",
-    \"/opt/admin-venv/bin/pip install fastapi uvicorn boto3 requests python-multipart\",
+    \"/opt/admin-venv/bin/pip install fastapi uvicorn boto3 requests python-multipart anthropic\",
     \"aws s3 cp s3://${S3_BUCKET}/_deploy/admin-deploy.tar.gz /tmp/admin-deploy.tar.gz --region $REGION\",
     \"mkdir -p /opt/admin-console && tar xzf /tmp/admin-deploy.tar.gz -C /opt/admin-console\",
-    \"chown -R ubuntu:ubuntu /opt/admin-console /opt/admin-venv\"
+    \"chown -R ubuntu:ubuntu /opt/admin-console /opt/admin-venv\",
+    \"printf '[Unit]\\\\nDescription=OpenClaw Admin Console\\\\nAfter=network.target\\\\n[Service]\\\\nType=simple\\\\nUser=ubuntu\\\\nWorkingDirectory=/opt/admin-console/server\\\\nEnvironmentFile=-/etc/openclaw/env\\\\nExecStart=/opt/admin-venv/bin/python main.py\\\\nRestart=always\\\\nRestartSec=5\\\\n[Install]\\\\nWantedBy=multi-user.target' > /etc/systemd/system/openclaw-admin.service\",
+    \"systemctl daemon-reload && systemctl enable openclaw-admin && systemctl start openclaw-admin\"
   ]}"
 ```
 
@@ -428,18 +491,27 @@ aws ssm put-parameter --name "/openclaw/${STACK_NAME}/jwt-secret" \
   --value "$(openssl rand -hex 32)" --type SecureString --overwrite --region $REGION
 ```
 
-### Step 5: Start Gateway Services
+### Step 5: Deploy and Start Gateway Services
 
 ```bash
+# Upload gateway files to S3 (run from repo root)
+aws s3 cp enterprise/gateway/tenant_router.py       "s3://${S3_BUCKET}/_deploy/tenant_router.py"
+aws s3 cp enterprise/gateway/bedrock_proxy_h2.js    "s3://${S3_BUCKET}/_deploy/bedrock_proxy_h2.js"
+aws s3 cp enterprise/gateway/bedrock-proxy-h2.service "s3://${S3_BUCKET}/_deploy/bedrock-proxy-h2.service"
+aws s3 cp enterprise/gateway/tenant-router.service  "s3://${S3_BUCKET}/_deploy/tenant-router.service"
+
+# Install gateway files on EC2 and start services
 aws ssm send-command --instance-ids $INSTANCE_ID --region $REGION \
   --document-name AWS-RunShellScript \
   --parameters "{\"commands\":[
-    \"sudo mkdir -p /etc/openclaw\",
-    \"printf 'STACK_NAME=${STACK_NAME}\\nAWS_REGION=${REGION}\\n' > /etc/openclaw/env\",
-    \"cp .../gateway/bedrock-proxy-h2.service /etc/systemd/system/\",
-    \"cp .../gateway/tenant-router.service /etc/systemd/system/\",
-    \"systemctl daemon-reload && systemctl enable bedrock-proxy-h2 tenant-router\",
-    \"systemctl start bedrock-proxy-h2 tenant-router\"
+    \"mkdir -p /etc/openclaw && printf 'STACK_NAME=${STACK_NAME}\\nAWS_REGION=${REGION}\\n' > /etc/openclaw/env\",
+    \"pip3 install boto3 requests\",
+    \"aws s3 cp s3://${S3_BUCKET}/_deploy/tenant_router.py /home/ubuntu/tenant_router.py --region $REGION\",
+    \"aws s3 cp s3://${S3_BUCKET}/_deploy/bedrock_proxy_h2.js /home/ubuntu/bedrock_proxy_h2.js --region $REGION\",
+    \"aws s3 cp s3://${S3_BUCKET}/_deploy/bedrock-proxy-h2.service /etc/systemd/system/bedrock-proxy-h2.service --region $REGION\",
+    \"aws s3 cp s3://${S3_BUCKET}/_deploy/tenant-router.service /etc/systemd/system/tenant-router.service --region $REGION\",
+    \"chown ubuntu:ubuntu /home/ubuntu/tenant_router.py /home/ubuntu/bedrock_proxy_h2.js\",
+    \"systemctl daemon-reload && systemctl enable bedrock-proxy-h2 tenant-router && systemctl start bedrock-proxy-h2 tenant-router\"
   ]}"
 ```
 
@@ -453,7 +525,7 @@ aws ssm start-session --target $INSTANCE_ID --region $REGION \
 
 Open **http://localhost:8199** → login with `emp-z3` (admin) and the password from Step 4.
 
-> **Public access:** Use CloudFront with an Elastic IP on the EC2. Set `PUBLIC_URL` env var in `start.sh` for correct Digital Twin URLs.
+> **Public access:** Use CloudFront with an Elastic IP on the EC2. Set `PUBLIC_URL` in `/etc/openclaw/env` (e.g. `PUBLIC_URL=https://your-domain.com`) for correct Digital Twin URLs — the admin console reads this file via `EnvironmentFile` in the systemd service.
 
 ### Step 7: Connect IM Channels (Optional)
 
@@ -645,7 +717,7 @@ docker run -d --name always-on-agent-helpdesk --restart unless-stopped \
   -e SHARED_AGENT_ID=agent-helpdesk \
   -e S3_BUCKET=your-bucket \
   -e STACK_NAME=openclaw-multitenancy \
-  263168716248.dkr.ecr.us-east-1.amazonaws.com/openclaw-multitenancy-multitenancy-agent:latest
+  $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$STACK_NAME-multitenancy-agent:latest
 
 # Register endpoint
 aws ssm put-parameter --name "/openclaw/openclaw-multitenancy/always-on/agent-helpdesk/endpoint" \
@@ -654,9 +726,10 @@ aws ssm put-parameter --name "/openclaw/openclaw-multitenancy/always-on/agent-he
 
 ### Digital Twin Public URL
 
-Set the `PUBLIC_URL` environment variable in `start.sh` for correct twin URLs:
+Set `PUBLIC_URL` in `/etc/openclaw/env` — the admin console systemd service reads this file automatically:
 ```bash
-export PUBLIC_URL="https://your-domain.com"
+echo "PUBLIC_URL=https://your-domain.com" >> /etc/openclaw/env
+sudo systemctl restart openclaw-admin
 ```
 
 ### Updating Agent Docker Image
