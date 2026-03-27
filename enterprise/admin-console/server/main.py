@@ -1577,9 +1577,11 @@ _CHANNEL_BOT_INFO = {
     },
     "feishu": {
         "botUsername": os.environ.get("FEISHU_BOT_NAME", "ACME Agent"),
-        "deepLinkTemplate": None,
+        # Feishu deep link opens the bot chat directly (doesn't support token param)
+        # User scans QR → bot chat opens → then manually sends /start TOKEN
+        "deepLinkTemplate": "https://applink.feishu.cn/client/bot/open?appId={appId}",
+        "feishuAppId": os.environ.get("FEISHU_APP_ID", "cli_a94cb611da399cdd"),
         "label": "Feishu / Lark",
-        "instructions": "Open Feishu → Search 'ACME Agent' → Open bot chat → send the command",
     },
     "slack": {
         "botUsername": os.environ.get("SLACK_BOT_USERNAME", "acme-agent"),
@@ -1612,7 +1614,14 @@ def pair_start(body: PairStartRequest, authorization: str = Header(default="")):
     bot_info = _CHANNEL_BOT_INFO.get(body.channel, {})
     bot_username = bot_info.get("botUsername", "")
     template = bot_info.get("deepLinkTemplate")
-    deep_link = template.format(bot=bot_username, token=token) if template else None
+    # Feishu uses appId in the deep link, not bot username or token
+    if template and "{appId}" in template:
+        app_id = bot_info.get("feishuAppId", "")
+        deep_link = template.format(appId=app_id) if app_id else None
+    elif template:
+        deep_link = template.format(bot=bot_username, token=token) if template else None
+    else:
+        deep_link = None
 
     return {
         "token": token,

@@ -113,9 +113,47 @@ function ChannelWizard({ channel, onDone, onCancel }: { channel: Channel; onDone
         <CountdownTimer expiresAt={session.expiresAt} />
       </div>
 
-      {session.deepLink ? (
+      {/* Feishu: QR to open bot + separate token to copy-paste */}
+      {session.deepLink && channel.id === 'feishu' ? (
         <div className="space-y-3">
-          {/* QR code via URL */}
+          <ol className="space-y-1.5 text-xs text-text-secondary">
+            <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">1</span><span>Scan the QR code below with <strong className="text-text-primary">Feishu</strong> to open ACME Agent directly</span></li>
+            <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">2</span><span>The bot chat opens automatically</span></li>
+            <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">3</span><span>Copy the code below and <strong className="text-text-primary">paste + send it</strong> in the chat</span></li>
+          </ol>
+          <div className="flex justify-center rounded-xl bg-white p-4">
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(session.deepLink)}`}
+              alt="Feishu QR code"
+              width={200} height={200}
+              className="rounded"
+            />
+          </div>
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-dark-border" /></div>
+            <div className="relative flex justify-center text-xs"><span className="bg-dark-card px-2 text-text-muted">or open directly</span></div>
+          </div>
+          <a href={session.deepLink} target="_blank" rel="noopener noreferrer">
+            <Button variant="default" className="w-full">
+              <ExternalLink size={14} /> Open ACME Agent in Feishu
+            </Button>
+          </a>
+          {/* Token to send after opening */}
+          <div className="rounded-xl bg-dark-bg border border-primary/20 p-3">
+            <p className="text-[10px] text-text-muted mb-2">Step 3 — Copy and send this command in the Feishu bot chat:</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-sm font-mono text-primary-light bg-primary/10 px-3 py-2 rounded-lg text-center">
+                /start {session.token}
+              </code>
+              <button onClick={() => navigator.clipboard?.writeText(`/start ${session.token}`)}
+                className="flex-shrink-0 px-2.5 py-2 rounded-lg bg-dark-hover text-text-muted hover:text-text-primary text-[10px] border border-dark-border/40 transition-colors">
+                Copy
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : session.deepLink ? (
+        <div className="space-y-3">
           <div className="flex justify-center rounded-xl bg-white p-4">
             <img
               src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(session.deepLink)}`}
@@ -137,15 +175,7 @@ function ChannelWizard({ channel, onDone, onCancel }: { channel: Channel; onDone
         </div>
       ) : (
         <div className="space-y-3">
-          {/* Step-by-step instructions per channel */}
           <div className="rounded-xl bg-dark-bg border border-dark-border/50 p-4 space-y-3">
-            {channel.id === 'feishu' && (
-              <ol className="space-y-2 text-xs text-text-secondary">
-                <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">1</span><span>Open <strong className="text-text-primary">Feishu</strong> (飞书) on your phone or desktop</span></li>
-                <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">2</span><span>Tap the search icon 🔍, search for <strong className="text-text-primary">ACME Agent</strong></span></li>
-                <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">3</span><span>Open the bot chat and <strong className="text-text-primary">send this exact command:</strong></span></li>
-              </ol>
-            )}
             {channel.id === 'discord' && (
               <ol className="space-y-2 text-xs text-text-secondary">
                 <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">1</span><span>Open <strong className="text-text-primary">Discord</strong> and go to the ACME Corp server</span></li>
