@@ -19,6 +19,7 @@ interface Attachment {
   size: number;
   type: string;
   isText: boolean;
+  isImage: boolean;
   contentPreview?: string;
 }
 
@@ -135,11 +136,21 @@ export default function PortalChat() {
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    const imgType = file.type.startsWith('image/');
+    const pdfType = file.type === 'application/pdf';
+
+    // Images and PDFs: skip upload, attach as "unsupported" so user knows clearly
+    if (imgType || pdfType) {
+      setAttachment({ name: file.name, size: file.size, type: file.type, isText: false, isImage: imgType });
+      return;
+    }
+
     setUploading(true);
     try {
       const form = new FormData();
       form.append('file', file);
-      // Use fetch directly — Content-Type must NOT be set for multipart (browser sets boundary)
       const token = (window as any).__openclaw_token || localStorage.getItem('openclaw_token') || '';
       const res = await fetch('/api/v1/portal/upload', {
         method: 'POST',
@@ -149,22 +160,16 @@ export default function PortalChat() {
       if (res.ok) {
         const data = await res.json();
         setAttachment({
-          name: data.filename,
-          size: data.size,
-          type: data.type,
-          isText: data.isText,
-          contentPreview: data.contentPreview,
+          name: data.filename, size: data.size, type: data.type,
+          isText: data.isText, isImage: false, contentPreview: data.contentPreview,
         });
       } else {
-        // Upload failed — still attach locally with file info only
-        setAttachment({ name: file.name, size: file.size, type: file.type, isText: false });
+        setAttachment({ name: file.name, size: file.size, type: file.type, isText: false, isImage: false });
       }
     } catch {
-      setAttachment({ name: file.name, size: file.size, type: file.type, isText: false });
+      setAttachment({ name: file.name, size: file.size, type: file.type, isText: false, isImage: false });
     }
     setUploading(false);
-    // Reset input so same file can be picked again
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   // ── Send message ───────────────────────────────────────────────────────────
@@ -178,10 +183,12 @@ export default function PortalChat() {
     if (attachment) {
       if (attachment.isText && attachment.contentPreview) {
         const ext = attachment.name.split('.').pop() || '';
-        // Explicitly tell the agent the content is inline — prevents it from looking for a file path
         fullContent += `\n\nI'm sharing the following file content with you directly in this message. The content is complete and ready for you to read and analyze — no need to access any file system or S3.\n\n**File: ${attachment.name}** (${fmtSize(attachment.size)})\n\`\`\`${ext}\n${attachment.contentPreview}\n\`\`\``;
+      } else if (attachment.isImage) {
+        // Agent can't view images yet — tell it clearly and ask it to guide the user
+        fullContent += `\n\n[The user is trying to share an image file: **${attachment.name}** (${fmtSize(attachment.size)}). Image viewing is not yet supported in this interface. Please acknowledge this and ask the user to describe the image content, paste relevant text, or explain what they need help with.]`;
       } else {
-        fullContent += `\n\n[Shared file: **${attachment.name}**, ${fmtSize(attachment.size)}, type: ${attachment.type}. Text content not available for this file type.]`;
+        fullContent += `\n\n[The user shared a binary file: **${attachment.name}** (${fmtSize(attachment.size)}, ${attachment.type}). You cannot read this file. Please ask the user to share the content as text instead.]`;
       }
     }
 
@@ -232,8 +239,6 @@ export default function PortalChat() {
       setSending(false);
     }
   };
-
-  const isImage = (type: string) => type.startsWith('image/');
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -325,14 +330,23 @@ export default function PortalChat() {
 
       {/* Attachment preview */}
       {attachment && (
-        <div className="px-6 pt-2">
-          <div className="flex items-center gap-2 rounded-xl bg-primary/10 border border-primary/30 px-3 py-2 w-fit max-w-xs">
-            {isImage(attachment.type)
-              ? <Image size={14} className="text-primary shrink-0" />
+        <div className="px-6 pt-2 space-y-1">
+          <div className={`flex items-center gap-2 rounded-xl px-3 py-2 w-fit max-w-sm border ${
+            attachment.isImage || (!attachment.isText && !attachment.isImage)
+              ? 'bg-warning/10 border-warning/30'
+              : 'bg-primary/10 border-primary/30'
+          }`}>
+            {attachment.isImage
+              ? <Image size={14} className="text-warning shrink-0" />
               : <FileText size={14} className="text-primary shrink-0" />}
             <span className="text-xs font-medium text-text-primary truncate">{attachment.name}</span>
             <span className="text-[10px] text-text-muted shrink-0">{fmtSize(attachment.size)}</span>
-            {attachment.isText && <span className="text-[10px] text-success shrink-0">content ready</span>}
+            {attachment.isText
+              ? <span className="text-[10px] text-success shrink-0">content ready</span>
+              : <span className="text-[10px] text-warning shrink-0">
+                  {attachment.isImage ? 'image — agent will ask you to describe it' : 'binary — not readable'}
+                </span>
+            }
             <button onClick={() => setAttachment(null)} className="text-text-muted hover:text-danger ml-1 shrink-0">
               <X size={12} />
             </button>
