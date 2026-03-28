@@ -777,11 +777,15 @@ def _invoke_openclaw_once(tenant_id: str, message: str, timeout: int = 300) -> d
         "--timeout", str(timeout),
     ]
 
-    # If running as root (EC2 host), sudo to ubuntu so openclaw config is accessible
-    # Use 'sudo -u ubuntu env KEY=VAL ...' and do NOT pass env= to subprocess
-    # (subprocess env= would override the sudo env vars)
+    # If running as root on EC2 host (not inside an ECS container), sudo to ubuntu
+    # so openclaw can find its config at /home/ubuntu/.openclaw/.
+    # In ECS containers, openclaw.json is at $HOME/.openclaw/ (HOME=/ for root process)
+    # and /home/ubuntu exists from the base image — using sudo would look for config
+    # in /home/ubuntu/.openclaw/ (not found) and lose the workspace path.
+    # Detect ECS via ECS_CONTAINER_METADATA_URI_V4 env var (set by Fargate automatically).
     run_env = None  # None = inherit current process env (used in container as ubuntu)
-    if os.geteuid() == 0 and os.path.isdir("/home/ubuntu"):
+    in_ecs = bool(os.environ.get("ECS_CONTAINER_METADATA_URI_V4"))
+    if os.geteuid() == 0 and os.path.isdir("/home/ubuntu") and not in_ecs:
         path_val = env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
         aws_region = env.get("AWS_REGION", "us-east-1")
         workspace_val = env.get("OPENCLAW_WORKSPACE", WORKSPACE)
