@@ -1085,16 +1085,94 @@ def create_user_mapping(body: UserMappingRequest):
                     pass
     return {"saved": True, "channel": body.channel, "channelUserId": body.channelUserId, "employeeId": body.employeeId}
 
+def _send_im_notification(channel: str, channel_user_id: str, message: str) -> None:
+    """Best-effort: send an IM message to the user via their platform bot.
+    Non-fatal — logs and returns silently on any error."""
+    try:
+        import requests as _req
+        if channel == "telegram":
+            token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+            if token:
+                _req.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": channel_user_id, "text": message},
+                    timeout=5,
+                )
+        elif channel == "feishu":
+            app_id = os.environ.get("FEISHU_APP_ID", "")
+            app_secret = os.environ.get("FEISHU_APP_SECRET", "")
+            if app_id and app_secret:
+                # Get tenant access token
+                auth = _req.post(
+                    "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                    json={"app_id": app_id, "app_secret": app_secret}, timeout=5,
+                ).json()
+                access_token = auth.get("tenant_access_token", "")
+                if access_token:
+                    _req.post(
+                        "https://open.feishu.cn/open-apis/message/v4/send/",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                        json={
+                            "user_id": channel_user_id,
+                            "msg_type": "text",
+                            "content": {"text": message},
+                        },
+                        timeout=5,
+                    )
+        # Discord DM requires creating a channel first — skip for now
+    except Exception as e:
+        print(f"[im-notify] {channel}/{channel_user_id}: {e}")
+
+
 @app.delete("/api/v1/bindings/user-mappings")
 def delete_user_mapping(channel: str, channelUserId: str):
-    """Delete an IM user → employee mapping from SSM."""
+    """Delete an IM user → employee mapping from DynamoDB + SSM.
+    Sends a best-effort IM notification before deleting."""
+    # Look up emp_id before deleting (needed for notification and audit)
+    existing = db.get_user_mapping(channel, channelUserId)
+    emp_id = existing.get("employeeId", "") if existing else ""
+
+    # Best-effort: notify employee their binding is being removed
+    if emp_id:
+        import threading as _thr
+        notif_msg = f"你的 {channel.capitalize()} 账号已从 ACME Corp AI Agent 解除绑定。如需重新连接请登录员工门户。"
+        _thr.Thread(
+            target=_send_im_notification,
+            args=(channel, channelUserId, notif_msg),
+            daemon=True,
+        ).start()
+
+    # Delete from DynamoDB MAPPING#
+    try:
+        db.delete_user_mapping(channel, channelUserId)
+    except Exception as e:
+        print(f"[delete-user-mapping] DynamoDB delete failed: {e}")
+
+    # Delete from SSM
     key = f"{channel}__{channelUserId}"
     path = f"{_mapping_prefix()}{key}"
     try:
         _ssm_client().delete_parameter(Name=path)
-        return {"deleted": True}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    except Exception:
+        pass  # SSM may not have this key if DynamoDB was primary
+
+    # Audit log
+    if emp_id:
+        try:
+            db.create_audit_entry({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "eventType": "config_change",
+                "actorId": emp_id,
+                "actorName": emp_id,
+                "targetType": "binding",
+                "targetId": f"{channel}__{channelUserId}",
+                "detail": f"IM binding revoked: {channel} {channelUserId} → {emp_id}",
+                "status": "success",
+            })
+        except Exception:
+            pass
+
+    return {"deleted": True}
 
 
 class PairingApproveRequest(BaseModel):
@@ -1773,8 +1851,32 @@ class PairCompleteRequest(BaseModel):
 
 @app.post("/api/v1/portal/channel/pair-start")
 def pair_start(body: PairStartRequest, authorization: str = Header(default="")):
-    """Employee initiates IM pairing. Returns a token + deep link / QR data."""
+    """Employee initiates IM pairing. Returns a token + deep link / QR data.
+    Cancels any existing pending token for the same employee+channel so only
+    one active token exists at a time."""
     user = _require_auth(authorization)
+
+    # Cancel existing pending tokens for this employee+channel (prevent token accumulation)
+    try:
+        import boto3 as _b3ps
+        from boto3.dynamodb.conditions import Key as _KPS, Attr as _APS
+        ddb = _b3ps.resource("dynamodb", region_name=os.environ.get("DYNAMODB_REGION", "us-east-2"))
+        table = ddb.Table(os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise"))
+        resp = table.query(
+            KeyConditionExpression=_KPS("PK").eq("ORG#acme") & _KPS("SK").begins_with("PAIR#"),
+            FilterExpression=_APS("employeeId").eq(user.employee_id)
+                & _APS("channel").eq(body.channel)
+                & _APS("status").eq("pending"),
+        )
+        for old_item in resp.get("Items", []):
+            table.update_item(
+                Key={"PK": "ORG#acme", "SK": old_item["SK"]},
+                UpdateExpression="SET #s = :cancelled",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":cancelled": "cancelled"},
+            )
+    except Exception as e:
+        print(f"[pair-start] cancel old tokens failed (non-fatal): {e}")
 
     import secrets, string
     token = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12))

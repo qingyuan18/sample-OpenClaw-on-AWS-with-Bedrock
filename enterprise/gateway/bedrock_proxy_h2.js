@@ -647,8 +647,8 @@ server.on('stream', (stream, headers) => {
       const pendingKey = `${channel}:${userId}`;
       const msgTrim = userText.trim();
 
-      // ── Step 2a: YES confirmation ──────────────────────────────────────
-      if (/^(yes|YES|Yes|Y|y|确认|绑定)$/.test(msgTrim) && pendingPairings.has(pendingKey)) {
+      // ── Step 2a: BIND confirmation (not YES/NO to avoid intercepting normal conversation) ──
+      if (/^(bind|BIND|Bind|绑定确认)$/.test(msgTrim) && pendingPairings.has(pendingKey)) {
         const pending = pendingPairings.get(pendingKey);
         if (Date.now() > pending.expiresAt) {
           pendingPairings.delete(pendingKey);
@@ -673,10 +673,10 @@ server.on('stream', (stream, headers) => {
         return;
       }
 
-      // ── Step 2b: NO / cancel ───────────────────────────────────────────
-      if (/^(no|NO|No|N|n|取消|cancel|CANCEL)$/.test(msgTrim) && pendingPairings.has(pendingKey)) {
+      // ── Step 2b: CANCEL ────────────────────────────────────────────────
+      if (/^(cancel|CANCEL|Cancel|取消绑定)$/.test(msgTrim) && pendingPairings.has(pendingKey)) {
         pendingPairings.delete(pendingKey);
-        injectResponse('已取消。如需重新绑定请回到 Portal 生成二维码。');
+        injectResponse('已取消绑定。如需重新连接请回到员工门户重新生成二维码。');
         return;
       }
 
@@ -696,7 +696,7 @@ server.on('stream', (stream, headers) => {
               expiresAt: Date.now() + 10 * 60 * 1000,
             });
             const action = isRebind ? '重新绑定' : '绑定';
-            const msg = `你正在将此账号${action}到 [${employeeName}${positionName ? ' · ' + positionName : ''}]。\n\n回复 YES 确认，回复 NO 取消（10 分钟内有效）。`;
+            const msg = `你正在将此账号${action}到 [${employeeName}${positionName ? ' · ' + positionName : ''}]。\n\n回复 BIND 确认绑定，回复 CANCEL 取消（10 分钟内有效）。`;
             log(`PATH C: Pending pairing ${channel} ${userId} → ${employeeName}`);
             injectResponse(msg);
             return;
