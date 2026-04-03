@@ -2367,7 +2367,13 @@ def portal_channel_disconnect(channel: str, authorization: str = Header(default=
     if not channel_user_id:
         raise HTTPException(404, f"No {channel} connection found for your account")
     # Delete the mapping
-    # Delete mappings from us-east-1 (where agent reads from)
+    # Delete from DynamoDB MAPPING# (primary)
+    try:
+        db.delete_user_mapping(channel, channel_user_id)
+    except Exception as e:
+        print(f"[disconnect] DynamoDB MAPPING# delete failed (non-fatal): {e}")
+
+    # Delete from SSM (backward compat dual-write cleanup)
     import boto3 as _b3_del
     ssm_del = _b3_del.client("ssm", region_name=_GATEWAY_REGION)
     prefix = _mapping_prefix()
@@ -2376,7 +2382,8 @@ def portal_channel_disconnect(channel: str, authorization: str = Header(default=
             ssm_del.delete_parameter(Name=f"{prefix}{key}")
         except Exception:
             pass
-    # Remove from DynamoDB employee channels
+
+    # Remove from DynamoDB employee channels list
     try:
         db.remove_employee_channel(user.employee_id, channel)
     except Exception as e:
