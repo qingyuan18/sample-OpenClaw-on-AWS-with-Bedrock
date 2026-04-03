@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Plus, Search, Zap, Bot, MessageSquare, Clock } from 'lucide-react';
+import { Users, Plus, Search, Zap, Bot, MessageSquare, Clock, Pencil, Trash2, AlertTriangle } from 'lucide-react';
 import { Card, Badge, Button, PageHeader, Modal, Input, Select, StatusDot, StatCard } from '../../components/ui';
-import { useEmployees, usePositions, useAgents, useBindings, useCreateEmployee, useEmployeeActivities } from '../../hooks/useApi';
+import { useEmployees, usePositions, useAgents, useBindings, useCreateEmployee, useUpdateEmployee, useDeleteEmployee, useEmployeeActivities } from '../../hooks/useApi';
 import { CHANNEL_LABELS } from '../../types';
 import type { Employee, ChannelType } from '../../types';
 
@@ -41,7 +41,13 @@ export default function Employees() {
   const { data: BINDINGS = [] } = useBindings();
   const { data: activityList = [] } = useEmployeeActivities();
   const createEmployee = useCreateEmployee();
+  const updateEmployee = useUpdateEmployee();
+  const deleteEmployee = useDeleteEmployee();
   const navigate = useNavigate();
+  const [editingEmp, setEditingEmp] = useState<Employee | null>(null);
+  const [deletingEmp, setDeletingEmp] = useState<Employee | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteBlockInfo, setDeleteBlockInfo] = useState<{ agentBindings: number; imMappings: number } | null>(null);
 
   // Build lookup maps from API data
   const activityMap = useMemo(() => {
@@ -133,6 +139,7 @@ export default function Employees() {
                 <th className="pb-3 text-xs font-medium text-text-muted uppercase tracking-wider">Agent</th>
                 <th className="pb-3 text-xs font-medium text-text-muted uppercase tracking-wider">Activity</th>
                 <th className="pb-3 text-xs font-medium text-text-muted uppercase tracking-wider">Last Active</th>
+                <th className="pb-3 pr-4 w-16" />
               </tr>
             </thead>
             <tbody>
@@ -141,7 +148,7 @@ export default function Employees() {
                 const activity = activityMap[e.id];
                 const channelStatus = activity?.channelStatus || {};
                 return (
-                  <tr key={e.id} onClick={() => setSelected(e)} className="border-b border-dark-border/50 hover:bg-dark-hover cursor-pointer transition-colors">
+                  <tr key={e.id} onClick={() => setSelected(e)} className="group/row border-b border-dark-border/50 hover:bg-dark-hover cursor-pointer transition-colors">
                     <td className="py-3 pl-4">
                       <div className="flex items-center gap-3">
                         <div className="relative">
@@ -204,6 +211,12 @@ export default function Employees() {
                       ) : (
                         <span className="text-xs text-text-muted">Never</span>
                       )}
+                    </td>
+                    <td className="py-3 pr-4">
+                      <div className="flex items-center gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">
+                        <button onClick={ev => { ev.stopPropagation(); setEditingEmp(e); }} className="p-1.5 rounded hover:bg-dark-bg text-text-muted hover:text-text-primary"><Pencil size={13} /></button>
+                        <button onClick={ev => { ev.stopPropagation(); setDeletingEmp(e); setDeleteError(''); setDeleteBlockInfo(null); }} className="p-1.5 rounded hover:bg-dark-bg text-text-muted hover:text-danger"><Trash2 size={13} /></button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -355,6 +368,92 @@ export default function Employees() {
           );
         })()}
       </Modal>
+
+      {/* Edit Employee Modal */}
+      {editingEmp && (
+        <Modal title={`Edit: ${editingEmp.name}`} onClose={() => setEditingEmp(null)} footer={
+          <><Button variant="ghost" onClick={() => setEditingEmp(null)}>Cancel</Button>
+          <Button variant="primary" disabled={updateEmployee.isPending} onClick={() => {
+            const pos = POSITIONS.find(p => p.id === editingEmp.positionId);
+            updateEmployee.mutate({ id: editingEmp.id, name: editingEmp.name, positionId: editingEmp.positionId,
+              positionName: pos?.name || editingEmp.positionName, departmentId: pos?.departmentId || editingEmp.departmentId,
+              departmentName: pos?.departmentName || editingEmp.departmentName, channels: editingEmp.channels, role: editingEmp.role },
+              { onSuccess: () => setEditingEmp(null) });
+          }}>{updateEmployee.isPending ? 'Saving…' : 'Save'}</Button></>
+        }>
+          <div className="space-y-4">
+            <Input label="Name" value={editingEmp.name} onChange={e => setEditingEmp({ ...editingEmp, name: e.target.value })} autoFocus />
+            <Select label="Position" value={editingEmp.positionId} onChange={v => {
+              const pos = POSITIONS.find(p => p.id === v);
+              setEditingEmp({ ...editingEmp, positionId: v, positionName: pos?.name || '', departmentId: pos?.departmentId || '', departmentName: pos?.departmentName || '' });
+            }} options={posOptions} />
+            <Select label="Role" value={editingEmp.role || 'employee'} onChange={v => setEditingEmp({ ...editingEmp, role: v as any })}
+              options={[{label:'Employee',value:'employee'},{label:'Manager',value:'manager'},{label:'Admin',value:'admin'}]} />
+            <div>
+              <label className="block text-xs font-medium text-text-secondary mb-1.5">IM Channels</label>
+              <div className="flex flex-wrap gap-2">
+                {['slack','discord','telegram','whatsapp','feishu','portal'].map(ch => (
+                  <button key={ch} onClick={() => setEditingEmp({ ...editingEmp, channels: editingEmp.channels.includes(ch) ? editingEmp.channels.filter(c => c !== ch) : [...editingEmp.channels, ch] })}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium border transition-colors ${editingEmp.channels.includes(ch) ? 'bg-primary/10 border-primary/40 text-primary-light' : 'border-dark-border text-text-muted hover:border-text-muted'}`}>
+                    {CHANNEL_LABELS[ch as ChannelType]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Employee Modal */}
+      {deletingEmp && (
+        <Modal title="Delete Employee" onClose={() => setDeletingEmp(null)} footer={
+          <><Button variant="ghost" onClick={() => setDeletingEmp(null)}>Cancel</Button>
+          {deleteBlockInfo ? (
+            <Button variant="danger" disabled={deleteEmployee.isPending} onClick={() => {
+              deleteEmployee.mutate({ empId: deletingEmp.id, force: true }, {
+                onSuccess: () => setDeletingEmp(null),
+                onError: (err: any) => setDeleteError(err?.response?.data?.message || err?.message || 'Delete failed'),
+              });
+            }}>{deleteEmployee.isPending ? 'Deleting…' : 'Force Delete (cascade)'}</Button>
+          ) : (
+            <Button variant="danger" disabled={deleteEmployee.isPending || !!deleteError} onClick={() => {
+              setDeleteError('');
+              deleteEmployee.mutate({ empId: deletingEmp.id, force: false }, {
+                onSuccess: () => setDeletingEmp(null),
+                onError: (err: any) => {
+                  const data = err?.response?.data;
+                  if (data?.error === 'employee_has_bindings') {
+                    setDeleteBlockInfo({ agentBindings: data.agentBindings, imMappings: data.imMappings });
+                    setDeleteError(data.message);
+                  } else {
+                    setDeleteError(data?.message || err?.message || 'Delete failed');
+                  }
+                },
+              });
+            }}>{deleteEmployee.isPending ? 'Checking…' : 'Delete'}</Button>
+          )}</>
+        }>
+          <div className="space-y-3">
+            <p className="text-sm text-text-primary">Delete employee <strong>{deletingEmp.name}</strong>?</p>
+            {deleteError && (
+              <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5">
+                <AlertTriangle size={16} className="text-danger mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm text-danger">{deleteError}</p>
+                  {deleteBlockInfo && (
+                    <p className="text-xs text-danger/80 mt-1">
+                      Click "Force Delete" to remove {deleteBlockInfo.agentBindings} agent binding(s) and {deleteBlockInfo.imMappings} IM pairing(s) along with the employee.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+            {!deleteError && (
+              <p className="text-xs text-text-muted">This will check for active bindings first. IM pairings and agent bindings will be listed if present.</p>
+            )}
+          </div>
+        </Modal>
+      )}
 
       {/* Create Modal */}
       <Modal

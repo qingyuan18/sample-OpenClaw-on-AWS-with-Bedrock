@@ -1,7 +1,7 @@
-import { Building2, Users, Bot, ChevronRight, ChevronDown, Zap, TrendingUp } from 'lucide-react';
+import { Building2, Users, Bot, ChevronRight, ChevronDown, Zap, TrendingUp, Plus, Pencil, Trash2, AlertTriangle } from 'lucide-react';
 import { useState, useMemo } from 'react';
-import { Card, Badge, PageHeader, StatCard, Button } from '../../components/ui';
-import { useDepartments, useEmployees, useAgents, useBindings, usePositions } from '../../hooks/useApi';
+import { Card, Badge, PageHeader, StatCard, Button, Modal, Input, Select } from '../../components/ui';
+import { useDepartments, useEmployees, useAgents, useBindings, usePositions, useCreateDepartment, useUpdateDepartment, useDeleteDepartment } from '../../hooks/useApi';
 import { CHANNEL_LABELS } from '../../types';
 import type { Department, ChannelType } from '../../types';
 import clsx from 'clsx';
@@ -53,8 +53,57 @@ export default function DeptTree() {
   const { data: agents = [] } = useAgents();
   const { data: bindings = [] } = useBindings();
   const { data: positions = [] } = usePositions();
+  const createDept = useCreateDepartment();
+  const updateDept = useUpdateDepartment();
+  const deleteDept = useDeleteDepartment();
   const [view, setView] = useState<'cards' | 'tree'>('cards');
   const [selectedDept, setSelectedDept] = useState<string | null>(null);
+
+  // CRUD modal state
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState<Department | null>(null);
+  const [deleting, setDeleting] = useState<Department | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [formName, setFormName] = useState('');
+  const [formParent, setFormParent] = useState('');
+  const [formHeadCount, setFormHeadCount] = useState('');
+
+  const deptOptions = departments.map(d => ({ label: d.name, value: d.id }));
+  const parentOptions = [{ label: '(Top-level — no parent)', value: '' }, ...deptOptions];
+
+  const openCreate = () => { setFormName(''); setFormParent(''); setFormHeadCount(''); setShowCreate(true); };
+  const openEdit = (dept: Department, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditing(dept);
+    setFormName(dept.name);
+    setFormParent(dept.parentId || '');
+    setFormHeadCount(String(dept.headCount || ''));
+  };
+  const openDelete = (dept: Department, e: React.MouseEvent) => { e.stopPropagation(); setDeleting(dept); setDeleteError(''); };
+
+  const handleCreate = () => {
+    if (!formName.trim()) return;
+    createDept.mutate({ name: formName.trim(), parentId: formParent || undefined, headCount: Number(formHeadCount) || 0 }, {
+      onSuccess: () => setShowCreate(false),
+    });
+  };
+  const handleEdit = () => {
+    if (!editing || !formName.trim()) return;
+    updateDept.mutate({ id: editing.id, name: formName.trim(), parentId: formParent || undefined, headCount: Number(formHeadCount) || 0 }, {
+      onSuccess: () => setEditing(null),
+    });
+  };
+  const handleDelete = () => {
+    if (!deleting) return;
+    setDeleteError('');
+    deleteDept.mutate(deleting.id, {
+      onSuccess: () => { setDeleting(null); setSelectedDept(null); },
+      onError: (err: any) => {
+        const msg = err?.response?.data?.message || err?.message || 'Delete failed';
+        setDeleteError(msg);
+      },
+    });
+  };
 
   const tree = buildTree(departments, employees);
   const topLevel = departments.filter(d => !d.parentId);
@@ -119,8 +168,9 @@ export default function DeptTree() {
         description="Organization structure, headcount, and AI agent coverage by department"
         actions={
           <div className="flex gap-2">
-            <Button variant={view === 'cards' ? 'primary' : 'default'} size="sm" onClick={() => setView('cards')}>Cards</Button>
-            <Button variant={view === 'tree' ? 'primary' : 'default'} size="sm" onClick={() => setView('tree')}>Tree</Button>
+            <Button variant="primary" size="sm" onClick={openCreate}><Plus size={14} /> Add Department</Button>
+            <Button variant={view === 'cards' ? 'default' : 'ghost'} size="sm" onClick={() => setView('cards')}>Cards</Button>
+            <Button variant={view === 'tree' ? 'default' : 'ghost'} size="sm" onClick={() => setView('tree')}>Tree</Button>
           </div>
         }
       />
@@ -155,7 +205,10 @@ export default function DeptTree() {
                       <p className="text-xs text-text-muted">{dept.positions.length} position{dept.positions.length !== 1 ? 's' : ''}</p>
                     </div>
                   </div>
-                  <ChevronRight size={16} className="text-text-muted group-hover:text-primary-light transition-colors mt-1" />
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                    <button onClick={e => openEdit(dept, e)} className="p-1.5 rounded hover:bg-dark-hover text-text-muted hover:text-text-primary"><Pencil size={13} /></button>
+                    <button onClick={e => openDelete(dept, e)} className="p-1.5 rounded hover:bg-dark-hover text-text-muted hover:text-danger"><Trash2 size={13} /></button>
+                  </div>
                 </div>
 
                 {/* Stats Row */}
@@ -255,6 +308,63 @@ export default function DeptTree() {
             </div>
           </Card>
         </div>
+      )}
+
+      {/* Create Department Modal */}
+      {showCreate && (
+        <Modal title="Create Department" onClose={() => setShowCreate(false)} footer={
+          <><Button variant="ghost" onClick={() => setShowCreate(false)}>Cancel</Button>
+          <Button variant="primary" onClick={handleCreate} disabled={!formName.trim() || createDept.isPending}>
+            {createDept.isPending ? 'Creating…' : 'Create'}
+          </Button></>
+        }>
+          <div className="space-y-4">
+            <Input label="Name" value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. Platform Team" autoFocus />
+            <Select label="Parent Department" value={formParent} onChange={e => setFormParent(e.target.value)} options={parentOptions} />
+            <Input label="Headcount" type="number" value={formHeadCount} onChange={e => setFormHeadCount(e.target.value)} placeholder="0" />
+          </div>
+        </Modal>
+      )}
+
+      {/* Edit Department Modal */}
+      {editing && (
+        <Modal title={`Edit: ${editing.name}`} onClose={() => setEditing(null)} footer={
+          <><Button variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
+          <Button variant="primary" onClick={handleEdit} disabled={!formName.trim() || updateDept.isPending}>
+            {updateDept.isPending ? 'Saving…' : 'Save'}
+          </Button></>
+        }>
+          <div className="space-y-4">
+            <Input label="Name" value={formName} onChange={e => setFormName(e.target.value)} autoFocus />
+            <Select label="Parent Department" value={formParent} onChange={e => setFormParent(e.target.value)}
+              options={parentOptions.filter(o => o.value !== editing.id)} />
+            <Input label="Headcount" type="number" value={formHeadCount} onChange={e => setFormHeadCount(e.target.value)} />
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete Department Modal */}
+      {deleting && (
+        <Modal title="Delete Department" onClose={() => setDeleting(null)} footer={
+          <><Button variant="ghost" onClick={() => setDeleting(null)}>Cancel</Button>
+          <Button variant="danger" onClick={handleDelete} disabled={deleteDept.isPending || !!deleteError}>
+            {deleteDept.isPending ? 'Deleting…' : 'Delete'}
+          </Button></>
+        }>
+          <div className="space-y-3">
+            <p className="text-sm text-text-primary">
+              Are you sure you want to delete <strong>{deleting.name}</strong>?
+            </p>
+            {deleteError ? (
+              <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5">
+                <AlertTriangle size={16} className="text-danger mt-0.5 shrink-0" />
+                <p className="text-sm text-danger">{deleteError}</p>
+              </div>
+            ) : (
+              <p className="text-xs text-text-muted">This cannot be undone. Employees and sub-departments must be reassigned first.</p>
+            )}
+          </div>
+        </Modal>
       )}
 
       {/* Department Detail Drawer */}

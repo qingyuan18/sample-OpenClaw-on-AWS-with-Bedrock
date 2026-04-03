@@ -20,7 +20,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     }
     throw new Error('Authentication required');
   }
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+  if (!res.ok) {
+    let data: any = null;
+    try { data = await res.json(); } catch { /* non-JSON body */ }
+    const err: any = new Error(data?.message || data?.detail || `API ${res.status}: ${res.statusText}`);
+    err.status = res.status;
+    err.response = { status: res.status, data };
+    throw err;
+  }
   return res.json();
 }
 

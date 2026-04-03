@@ -149,11 +149,37 @@ def get_agent(agent_id: str) -> Optional[dict]:
 def get_bindings() -> list[dict]:
     return _query("BIND#")
 
+def get_bindings_for_employee(emp_id: str) -> list[dict]:
+    """Get all BIND# records for an employee (agent-employee bindings)."""
+    all_bindings = get_bindings()
+    return [b for b in all_bindings if b.get("employeeId") == emp_id]
+
+def _delete_item(sk: str) -> bool:
+    """Delete an item by SK."""
+    try:
+        _get_table().delete_item(Key={"PK": ORG_PK, "SK": sk})
+        return True
+    except ClientError as e:
+        print(f"[db] DynamoDB delete error: {e}")
+        return False
+
 def create_department(data: dict) -> dict:
     did = data.get("id", f"dept-{int(__import__('time').time())}")
     data["id"] = did
     _put_item(f"DEPT#{did}", data, "TYPE#dept", f"DEPT#{did}")
     return data
+
+def update_department(dept_id: str, updates: dict) -> dict | None:
+    item = _get_item(f"DEPT#{dept_id}")
+    if not item:
+        return None
+    item.update(updates)
+    item["id"] = dept_id
+    _put_item(f"DEPT#{dept_id}", item, "TYPE#dept", f"DEPT#{dept_id}")
+    return item
+
+def delete_department(dept_id: str) -> bool:
+    return _delete_item(f"DEPT#{dept_id}")
 
 def create_position(data: dict) -> dict:
     pid = data.get("id", f"pos-{int(__import__('time').time())}")
@@ -161,11 +187,38 @@ def create_position(data: dict) -> dict:
     _put_item(f"POS#{pid}", data, "TYPE#pos", f"POS#{pid}")
     return data
 
+def update_position(pos_id: str, updates: dict) -> dict | None:
+    item = _get_item(f"POS#{pos_id}")
+    if not item:
+        return None
+    item.update(updates)
+    item["id"] = pos_id
+    _put_item(f"POS#{pos_id}", item, "TYPE#pos", f"POS#{pos_id}")
+    return item
+
+def delete_position(pos_id: str) -> bool:
+    return _delete_item(f"POS#{pos_id}")
+
 def create_employee(data: dict) -> dict:
     eid = data.get("id", f"emp-{int(__import__('time').time())}")
     data["id"] = eid
     _put_item(f"EMP#{eid}", data, "TYPE#emp", f"EMP#{eid}")
     return data
+
+def update_employee(emp_id: str, updates: dict) -> dict | None:
+    item = _get_item(f"EMP#{emp_id}")
+    if not item:
+        return None
+    item.update(updates)
+    item["id"] = emp_id
+    _put_item(f"EMP#{emp_id}", item, "TYPE#emp", f"EMP#{emp_id}")
+    return item
+
+def delete_employee(emp_id: str) -> bool:
+    return _delete_item(f"EMP#{emp_id}")
+
+def delete_binding(bind_id: str) -> bool:
+    return _delete_item(f"BIND#{bind_id}")
 
 def create_agent(data: dict) -> dict:
     aid = data.get("id", f"agent-{int(__import__('time').time())}")

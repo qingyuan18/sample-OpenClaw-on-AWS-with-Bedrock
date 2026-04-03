@@ -233,6 +233,44 @@ def get_departments(authorization: str = Header(default="")):
             depts = [d for d in depts if d["id"] in scope]
     return depts
 
+@app.post("/api/v1/org/departments")
+def create_department(body: dict, authorization: str = Header(default="")):
+    _require_role(authorization, roles=["admin"])
+    return db.create_department(body)
+
+@app.put("/api/v1/org/departments/{dept_id}")
+def update_department(dept_id: str, body: dict, authorization: str = Header(default="")):
+    _require_role(authorization, roles=["admin"])
+    body.pop("id", None)
+    result = db.update_department(dept_id, body)
+    if not result:
+        raise HTTPException(404, f"Department {dept_id} not found")
+    return result
+
+@app.delete("/api/v1/org/departments/{dept_id}")
+def delete_department(dept_id: str, authorization: str = Header(default="")):
+    _require_role(authorization, roles=["admin"])
+    employees = db.get_employees()
+    dept_employees = [e for e in employees if e.get("departmentId") == dept_id]
+    if dept_employees:
+        raise HTTPException(409, {
+            "error": "department_has_employees",
+            "count": len(dept_employees),
+            "names": [e["name"] for e in dept_employees[:5]],
+            "message": f"{len(dept_employees)} employee(s) are in this department. Reassign them before deleting.",
+        })
+    all_depts = db.get_departments()
+    sub_depts = [d for d in all_depts if d.get("parentId") == dept_id]
+    if sub_depts:
+        raise HTTPException(409, {
+            "error": "department_has_subdepts",
+            "count": len(sub_depts),
+            "names": [d["name"] for d in sub_depts],
+            "message": f"{len(sub_depts)} sub-department(s) exist under this department. Delete them first.",
+        })
+    db.delete_department(dept_id)
+    return {"ok": True, "deleted": dept_id}
+
 @app.get("/api/v1/org/positions")
 def get_positions(authorization: str = Header(default="")):
     user = _get_current_user(authorization)
@@ -249,8 +287,28 @@ def create_position(body: dict):
 
 @app.put("/api/v1/org/positions/{pos_id}")
 def update_position(pos_id: str, body: dict):
+    body.pop("id", None)
+    result = db.update_position(pos_id, body)
+    if result:
+        return result
+    # Fallback: upsert if not found
     body["id"] = pos_id
-    return db.create_position(body)  # upsert
+    return db.create_position(body)
+
+@app.delete("/api/v1/org/positions/{pos_id}")
+def delete_position(pos_id: str, authorization: str = Header(default="")):
+    _require_role(authorization, roles=["admin"])
+    employees = db.get_employees()
+    pos_employees = [e for e in employees if e.get("positionId") == pos_id]
+    if pos_employees:
+        raise HTTPException(409, {
+            "error": "position_has_employees",
+            "count": len(pos_employees),
+            "names": [e["name"] for e in pos_employees[:5]],
+            "message": f"{len(pos_employees)} employee(s) are in this position. Reassign them first.",
+        })
+    db.delete_position(pos_id)
+    return {"ok": True, "deleted": pos_id}
 
 @app.get("/api/v1/org/employees")
 def get_employees(authorization: str = Header(default="")):
@@ -278,6 +336,39 @@ def create_employee(body: dict):
         except Exception as e:
             print(f"[auto-provision] failed for {result.get('id')}: {e}")
     return result
+
+@app.put("/api/v1/org/employees/{emp_id}")
+def update_employee(emp_id: str, body: dict, authorization: str = Header(default="")):
+    _require_role(authorization, roles=["admin"])
+    body.pop("id", None)
+    result = db.update_employee(emp_id, body)
+    if not result:
+        raise HTTPException(404, f"Employee {emp_id} not found")
+    return result
+
+@app.delete("/api/v1/org/employees/{emp_id}")
+def delete_employee(emp_id: str, force: bool = False, authorization: str = Header(default="")):
+    _require_role(authorization, roles=["admin"])
+    bindings = db.get_bindings_for_employee(emp_id)
+    im_mappings = db.get_user_mappings_for_employee(emp_id)
+    total_links = len(bindings) + len(im_mappings)
+    if total_links > 0 and not force:
+        raise HTTPException(409, {
+            "error": "employee_has_bindings",
+            "agentBindings": len(bindings),
+            "imMappings": len(im_mappings),
+            "message": (
+                f"This employee has {len(bindings)} agent binding(s) and {len(im_mappings)} IM channel pairing(s). "
+                "Pass force=true to delete all associated bindings along with the employee."
+            ),
+        })
+    if force:
+        for b in bindings:
+            db.delete_binding(b["id"])
+        for m in im_mappings:
+            db.delete_user_mapping(m["channel"], m["channelUserId"])
+    db.delete_employee(emp_id)
+    return {"ok": True, "deleted": emp_id, "bindingsDeleted": len(bindings), "imMappingsDeleted": len(im_mappings)}
 
 
 @app.get("/api/v1/org/employees/activity")

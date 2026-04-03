@@ -24,11 +24,51 @@ export function usePositions() {
   });
 }
 
+export function useCreateDepartment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Partial<Department>) => api.post<Department>('/org/departments', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['departments'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); },
+  });
+}
+
+export function useUpdateDepartment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Partial<Department>) => api.put<Department>(`/org/departments/${id}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['departments'] }),
+  });
+}
+
+export function useDeleteDepartment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (deptId: string) => api.del<{ ok: boolean }>(`/org/departments/${deptId}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['departments'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); },
+  });
+}
+
 export function useCreatePosition() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: Partial<Position>) => api.post<Position>('/org/positions', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['positions'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); },
+  });
+}
+
+export function useUpdatePosition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Partial<Position>) => api.put<Position>(`/org/positions/${id}`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['positions'] }),
+  });
+}
+
+export function useDeletePosition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (posId: string) => api.del<{ ok: boolean }>(`/org/positions/${posId}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['positions'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); },
   });
 }
 
@@ -57,7 +97,29 @@ export function useCreateEmployee() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: Partial<Employee>) => api.post<Employee>('/org/employees', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['employees'] }); qc.invalidateQueries({ queryKey: ['dashboard'] }); },
+  });
+}
+
+export function useUpdateEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Partial<Employee>) => api.put<Employee>(`/org/employees/${id}`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['employees'] }),
+  });
+}
+
+export function useDeleteEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ empId, force = false }: { empId: string; force?: boolean }) =>
+      api.del<{ ok: boolean; agentBindings: number; imMappings: number }>(`/org/employees/${empId}?force=${force}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['employees'] });
+      qc.invalidateQueries({ queryKey: ['bindings'] });
+      qc.invalidateQueries({ queryKey: ['user-mappings'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
   });
 }
 
