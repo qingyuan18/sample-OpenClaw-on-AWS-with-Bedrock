@@ -696,7 +696,7 @@ server.on('stream', (stream, headers) => {
         const pending = pendingPairings.get(pendingKey);
         if (Date.now() > pending.expiresAt) {
           pendingPairings.delete(pendingKey);
-          injectResponse('⏱ 绑定超时，请回到 Portal 重新生成二维码。');
+          injectResponse('Binding timed out. Please go back to the Employee Portal and generate a new QR code.');
           return;
         }
         try {
@@ -706,13 +706,13 @@ server.on('stream', (stream, headers) => {
           pendingPairings.delete(pendingKey);
           if (result.status === 200 && result.body.success) {
             log(`PATH C: Pairing confirmed ${channel} ${userId} → ${result.body.employeeId}`);
-            injectResponse(`✅ 绑定成功！你现在可以在这里直接与 AI Agent 对话了。`);
+            injectResponse(`Connected! You can now chat with your AI Agent here.`);
           } else {
-            injectResponse(`绑定失败：${result.body.detail || '请重试'}。`);
+            injectResponse(`Binding failed: ${result.body.detail || 'please try again'}.`);
           }
         } catch (e) {
           log(`PATH C: pair-complete error: ${e.message}`);
-          injectResponse('绑定时出错，请稍后重试。');
+          injectResponse('Binding error. Please try again later.');
         }
         return;
       }
@@ -720,7 +720,7 @@ server.on('stream', (stream, headers) => {
       // ── Step 2b: CANCEL ────────────────────────────────────────────────
       if (/^(cancel|CANCEL|Cancel|取消绑定)$/.test(msgTrim) && pendingPairings.has(pendingKey)) {
         pendingPairings.delete(pendingKey);
-        injectResponse('已取消绑定。如需重新连接请回到员工门户重新生成二维码。');
+        injectResponse('Binding cancelled. To reconnect, go to the Employee Portal and generate a new QR code.');
         return;
       }
 
@@ -739,14 +739,14 @@ server.on('stream', (stream, headers) => {
               empName: employeeName,
               expiresAt: Date.now() + 10 * 60 * 1000,
             });
-            const action = isRebind ? '重新绑定' : '绑定';
-            const msg = `你正在将此账号${action}到 [${employeeName}${positionName ? ' · ' + positionName : ''}]。\n\n回复 BIND 确认绑定，回复 CANCEL 取消（10 分钟内有效）。`;
+            const action = isRebind ? 're-linking' : 'linking';
+            const msg = `You are ${action} this account to [${employeeName}${positionName ? ' · ' + positionName : ''}].\n\nReply BIND to confirm, or CANCEL to abort (valid for 10 minutes).`;
             log(`PATH C: Pending pairing ${channel} ${userId} → ${employeeName}`);
             injectResponse(msg);
             return;
           }
           if (pending.status === 200 && pending.body.reason === 'already_bound_other') {
-            injectResponse(`此账号已绑定到 ${pending.body.boundTo}，请联系 IT 管理员解绑后再试。`);
+            injectResponse(`This account is already linked to ${pending.body.boundTo}. Please contact your IT admin to unlink it first.`);
             return;
           }
           // Token invalid/expired — fall through to normal routing
@@ -764,7 +764,7 @@ server.on('stream', (stream, headers) => {
         const binding = await checkImBinding(channel, userId);
         if (!binding.bound) {
           log(`Binding check: ${channel}:${userId} not bound — rejecting`);
-          injectResponse('此账号尚未绑定到企业员工账户。请通过员工门户（Portal）扫码绑定后再使用。');
+          injectResponse('This account is not linked to an employee. Please bind your account via the Employee Portal first.');
           return;
         }
         log(`Binding check: ${channel}:${userId} → ${binding.employeeId}`);
