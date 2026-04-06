@@ -154,7 +154,7 @@ Admin Console → Agent Factory → agent-helpdesk → [Start Always-on]
    g. SSM endpoint registration (`http://{task_ip}:8080`)
 6. Admin Console shows: Status = Running, Endpoint = registered
 
-### Phase 4: Assign Employees (Shared Agent)
+### Phase 4: Assign Employees
 
 ```
 Admin Console → Agent Factory → agent-helpdesk → Assignments tab

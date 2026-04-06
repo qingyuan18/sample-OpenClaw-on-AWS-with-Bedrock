@@ -49,7 +49,7 @@ Every agent uses the same Docker image. Admin chooses the deployment mode per ag
 | **Persistence** | EFS-backed workspace — durable across container restarts |
 | **Best for** | Customer service bots, executive assistants with frequent cron tasks, high-traffic Digital Twins |
 
-Admin toggles deployment mode from **Agent Factory → agent detail**. Any agent can be always-on — personal or team. A personal agent with always-on = dedicated container for that employee. A team agent with always-on = one container serving multiple assigned employees.
+Admin selects deployment mode when creating an agent in **Agent Factory**. Any agent can be always-on — whether it serves one employee or multiple. An always-on agent gets a dedicated ECS Fargate container with auto-restart.
 
 ---
 
@@ -105,7 +105,7 @@ Additional controls: no public ports (SSM only) · IAM roles throughout, no hard
 | **Position → Runtime Routing** | 3-tier routing chain: employee override → position rule → default. Assign positions to runtimes from Security Center UI, propagates to all members automatically |
 | **Per-Employee Model Config** | Override model, context window, compaction settings, and response language at position OR employee level from Agent Factory → Configuration tab |
 | **IM Channel Management** | Admin sees every employee's IM connections grouped by channel — when they paired, session count, last active, one-click disconnect |
-| **Org CRUD** | Full create/edit/delete for Departments, Positions, and Employees from Admin Console. Delete is guarded: blocks if employees or bindings exist, prompts force-cascade delete |
+| **Org CRUD** | Full create/edit/delete for Departments, Positions, and Employees from Admin Console. Delete is guarded: blocks if employees or agent assignments exist, prompts force-cascade delete |
 | **Security Center** | Live AWS resource browser — ECR images, IAM roles, VPC security groups with console links. Configure runtime images and IAM roles from the UI |
 | **Session Storage + Memory** | Serverless: Session Storage persists workspace across microVM cycles + S3 writeback for admin visibility. Always-on: EFS workspace + Gateway compaction. Same memory across Discord, Telegram, Feishu, and Portal |
 | **Dynamic Config, Zero Redeploy** | Change model, tool permissions, SOUL content, or KB assignments → propagates via config version poll (5 min) or instant via `StopRuntimeSession`. No container rebuild, no runtime update |
@@ -321,7 +321,7 @@ The org directory KB (seeded via `seed_knowledge_docs.py`, refreshed by re-runni
 │  PATH 4: IM Channels (Telegram/Feishu/Discord/Slack — bound)    │
 │  ┌────────────────────────────────────────────────────────┐      │
 │  │  Paths 3 and 4 share the SAME AgentCore session        │      │
-│  │    H2 Proxy enforces binding: unbound IM → rejected    │      │
+│  │    H2 Proxy enforces IM pairing: unpaired IM → rejected │      │
 │  │    Tenant Router resolves channel user_id → emp_id     │      │
 │  │    session_id prefix: emp__emp-id__  (both paths)      │      │
 │  │    SESSION_CONTEXT.md → "Employee Session, Verified"   │      │
@@ -357,7 +357,7 @@ The org directory KB (seeded via `seed_knowledge_docs.py`, refreshed by re-runni
 │                                                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │  AWS Services                                                    │
-│  ├── DynamoDB — org, agents, bindings, audit, usage, config,     │
+│  ├── DynamoDB — org, agents, assignments, audit, usage, config,   │
 │  │              Digital Twin tokens, KB assignments              │
 │  ├── S3 — SOUL templates, skills, workspaces, knowledge,        │
 │  │         org directory, per-employee memory, admin visibility  │
@@ -846,7 +846,7 @@ To add a new KB: Admin Console → Knowledge Base → upload Markdown → Assign
 | Departments | 15 | 7 top-level + 8 sub-departments including Admin Lab |
 | Positions | 12 | SA, SDE, DevOps, QA, AE, PM, FA, HR, CSM, Legal, Executive, Platform Admin |
 | Employees | 27 | Each with workspace files in S3 |
-| Agents | 29 | Personal + shared |
+| Agents | 29 | 28 serverless + 1 always-on |
 | IM Channels | 5 | Telegram, Feishu, Discord, Portal, + always-on |
 | Skills | 26 | Role-scoped skill packages |
 | Knowledge Docs | 14 | 11 topic KBs + company-directory.md (org directory, auto-assigned to all positions) |
@@ -938,7 +938,7 @@ enterprise/
 
 ### Always-on Agent Management (ECS Fargate)
 
-Always-on agents run as **ECS Fargate tasks** with EFS-backed persistent workspace. Each task self-registers its private VPC IP in SSM on startup; the Tenant Router reads that SSM entry to route requests. Any agent can be toggled to always-on — personal (1 employee) or team (N employees assigned).
+Always-on agents run as **ECS Fargate Services** with EFS-backed persistent workspace and auto-restart on crash. Each task self-registers its private VPC IP in SSM on startup; the Tenant Router reads that SSM entry to route requests. Admin selects deployment mode (Serverless or Always-on) when creating an agent in Agent Factory.
 
 Start/stop from **Agent Factory → agent detail → deployment mode toggle**, or manually:
 
