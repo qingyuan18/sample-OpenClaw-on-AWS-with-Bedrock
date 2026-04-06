@@ -42,11 +42,11 @@ function shortDate(iso: string): string {
 
 const CHANNEL_LABELS: Record<string, string> = {
   telegram: 'Telegram', discord: 'Discord', feishu: 'Feishu / Lark',
-  slack: 'Slack', teams: 'Microsoft Teams', googlechat: 'Google Chat',
-  whatsapp: 'WhatsApp', wechat: 'WeChat',
+  dingtalk: 'DingTalk', slack: 'Slack', teams: 'Microsoft Teams',
+  googlechat: 'Google Chat', whatsapp: 'WhatsApp', wechat: 'WeChat',
 };
 
-const ENTERPRISE_CHANNELS = ['telegram', 'discord', 'feishu', 'slack', 'teams', 'googlechat'];
+const ENTERPRISE_CHANNELS = ['telegram', 'discord', 'feishu', 'dingtalk', 'slack', 'teams', 'googlechat', 'whatsapp', 'wechat'];
 
 // ─── Connection Row ───────────────────────────────────────────────────────────
 
@@ -104,6 +104,9 @@ function ChannelConnections({ channel, connections, channelStatus, onRevoke }: {
   channelStatus?: IMChannel; onRevoke: (channelUserId: string) => void;
 }) {
   const qc = useQueryClient();
+  const [testResult, setTestResult] = useState<{ ok: boolean; botName?: string; error?: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
   const revokeMutation = useMutation({
     mutationFn: ({ ch, uid }: { ch: string; uid: string }) =>
       api.del(`/bindings/user-mappings?channel=${ch}&channelUserId=${uid}`),
@@ -113,8 +116,23 @@ function ChannelConnections({ channel, connections, channelStatus, onRevoke }: {
     },
   });
 
+  const handleTestConnection = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await api.post<{ ok: boolean; botName?: string; error?: string }>(
+        `/admin/im-channels/${channel}/test`, {}
+      );
+      setTestResult(result);
+    } catch {
+      setTestResult({ ok: false, error: 'Request failed' });
+    }
+    setTesting(false);
+  };
+
   const Icon = IM_ICONS[channel];
   const label = CHANNEL_LABELS[channel] || channel;
+  const isConfigured = channelStatus?.status === 'connected' || channelStatus?.status === 'configured';
 
   return (
     <div className="space-y-4">
@@ -122,21 +140,50 @@ function ChannelConnections({ channel, connections, channelStatus, onRevoke }: {
       <div className="flex items-center gap-4 rounded-xl border px-4 py-3 bg-surface-dim border-dark-border/50">
         <div className="shrink-0">{Icon ? <Icon size={32} /> : <Wifi size={32} className="text-text-muted" />}</div>
         <div className="flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-sm font-semibold text-text-primary">{label} Bot</h3>
             {channelStatus?.status === 'connected' && <Badge color="success" dot>Bot Active</Badge>}
             {channelStatus?.status === 'configured' && <Badge color="warning" dot>Bot Configured</Badge>}
             {(!channelStatus || channelStatus.status === 'not_connected') && <Badge color="default">Bot Not Connected</Badge>}
+            {testResult && (
+              <span className={`text-xs ${testResult.ok ? 'text-success' : 'text-danger'}`}>
+                {testResult.ok ? `Connection OK — @${testResult.botName}` : `Failed: ${testResult.error}`}
+              </span>
+            )}
           </div>
           {channelStatus?.gatewayInfo && (
             <p className="text-[10px] text-text-muted font-mono mt-0.5">{channelStatus.gatewayInfo}</p>
           )}
         </div>
-        <div className="text-right shrink-0">
-          <p className="text-2xl font-bold text-text-primary">{connections.length}</p>
-          <p className="text-xs text-text-muted">employees connected</p>
+        <div className="flex items-center gap-3 shrink-0">
+          {isConfigured && (
+            <Button variant="default" size="sm" onClick={handleTestConnection} disabled={testing}>
+              {testing ? <RefreshCw size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+              {testing ? 'Testing...' : 'Test Connection'}
+            </Button>
+          )}
+          <div className="text-right">
+            <p className="text-2xl font-bold text-text-primary">{connections.length}</p>
+            <p className="text-xs text-text-muted">employees connected</p>
+          </div>
         </div>
       </div>
+
+      {/* Setup guide for unconfigured bots */}
+      {(!channelStatus || channelStatus.status === 'not_connected') && (
+        <div className="rounded-xl border border-warning/20 bg-warning/5 px-4 py-3 text-sm">
+          <p className="font-medium text-text-primary mb-1">Bot not configured</p>
+          <p className="text-xs text-text-muted mb-2">
+            Configure the {label} bot via the <strong>OpenClaw Gateway UI</strong> (one-time setup by IT Admin):
+          </p>
+          <ol className="text-xs text-text-muted space-y-0.5 list-decimal list-inside">
+            <li>SSM port-forward: <code className="bg-dark-hover px-1 rounded">aws ssm start-session --target $INSTANCE_ID --document-name AWS-StartPortForwardingSession --parameters portNumber=18789,localPortNumber=18789</code></li>
+            <li>Open <code className="bg-dark-hover px-1 rounded">http://localhost:18789</code> → Channels → Add {label}</li>
+            <li>Paste your bot token / credentials → Save</li>
+            <li>Come back here and click <strong>Refresh</strong> to confirm status</li>
+          </ol>
+        </div>
+      )}
 
       {/* Connections table */}
       {connections.length === 0 ? (

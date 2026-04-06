@@ -13,6 +13,8 @@ Metadata:
       - Label:
           default: "Network Configuration"
         Parameters:
+          - ExistingVpcId
+          - ExistingSubnetId
           - CreateVPCEndpoints
           - AllowedSSHCIDR
       - Label:
@@ -67,6 +69,21 @@ Parameters:
     Default: "0.0.0.0/0"
     Description: "CIDR for SSH access (recommend SSM Session Manager, set to 127.0.0.1/32 to disable SSH)"
 
+  WorkspaceBucketName:
+    Type: String
+    Default: ""
+    Description: "Custom S3 bucket name for tenant workspaces. Leave empty to auto-generate (openclaw-tenants-ACCOUNTID). Set a custom name when deploying multiple stacks in the same account."
+
+  ExistingVpcId:
+    Type: String
+    Default: ""
+    Description: "ID of an existing VPC to deploy into (e.g. vpc-0abc123). Leave empty to create a new VPC automatically."
+
+  ExistingSubnetId:
+    Type: String
+    Default: ""
+    Description: "ID of an existing public subnet to deploy EC2 into (e.g. subnet-0abc123). Required when ExistingVpcId is set. Must have internet access."
+
   CreateVPCEndpoints:
     Type: String
     Default: "true"
@@ -107,7 +124,16 @@ Parameters:
 # Conditions
 # ===========================================================================
 Conditions:
+  # When ExistingVpcId is empty, create a new VPC and subnets.
+  # When provided, reuse the existing VPC/subnet and skip network resource creation.
+  CreateNewVPC: !Equals [!Ref ExistingVpcId, ""]
+  HasCustomBucketName: !Not [!Equals [!Ref WorkspaceBucketName, ""]]
   CreateEndpoints: !Equals [!Ref CreateVPCEndpoints, "true"]
+  # PrivateSubnet is only needed for VPC endpoints. Skip it when endpoints are disabled
+  # to avoid GuardDuty-managed ENIs blocking stack deletion.
+  CreatePrivateSubnet: !And
+    - !Condition CreateNewVPC
+    - !Condition CreateEndpoints
   AllowSSH: !Not [!Equals [!Ref AllowedSSHCIDR, "127.0.0.1/32"]]
   HasKeyPair: !Not [!Equals [!Ref KeyPairName, ""]]
   UseGraviton: !Or
@@ -132,8 +158,10 @@ Resources:
       Count: 1
 
   # ==================== VPC and Network ====================
+  # All resources below are only created when ExistingVpcId is NOT provided.
   OpenClawVPC:
     Type: AWS::EC2::VPC
+    Condition: CreateNewVPC
     Properties:
       CidrBlock: "10.0.0.0/16"
       EnableDnsHostnames: true
@@ -144,15 +172,18 @@ Resources:
 
   OpenClawInternetGateway:
     Type: AWS::EC2::InternetGateway
+    Condition: CreateNewVPC
 
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
+    Condition: CreateNewVPC
     Properties:
       VpcId: !Ref OpenClawVPC
       InternetGatewayId: !Ref OpenClawInternetGateway
 
   PublicSubnet:
     Type: AWS::EC2::Subnet
+    Condition: CreateNewVPC
     Properties:
       VpcId: !Ref OpenClawVPC
       CidrBlock: "10.0.1.0/24"
@@ -164,6 +195,7 @@ Resources:
 
   PrivateSubnet:
     Type: AWS::EC2::Subnet
+    Condition: CreatePrivateSubnet
     Properties:
       VpcId: !Ref OpenClawVPC
       CidrBlock: "10.0.2.0/24"
@@ -174,11 +206,13 @@ Resources:
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
+    Condition: CreateNewVPC
     Properties:
       VpcId: !Ref OpenClawVPC
 
   PublicRoute:
     Type: AWS::EC2::Route
+    Condition: CreateNewVPC
     DependsOn: AttachGateway
     Properties:
       RouteTableId: !Ref PublicRouteTable
@@ -187,6 +221,7 @@ Resources:
 
   SubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateNewVPC
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
@@ -196,7 +231,7 @@ Resources:
     Condition: CreateEndpoints
     Properties:
       GroupDescription: "Security group for VPC endpoints"
-      VpcId: !Ref OpenClawVPC
+      VpcId: !If [CreateNewVPC, !Ref OpenClawVPC, !Ref ExistingVpcId]
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 443
@@ -210,12 +245,12 @@ Resources:
     Type: AWS::EC2::VPCEndpoint
     Condition: CreateEndpoints
     Properties:
-      VpcId: !Ref OpenClawVPC
+      VpcId: !If [CreateNewVPC, !Ref OpenClawVPC, !Ref ExistingVpcId]
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.bedrock-runtime'
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
       SubnetIds:
-        - !Ref PrivateSubnet
+        - !If [CreateNewVPC, !Ref PrivateSubnet, !Ref ExistingSubnetId]
       SecurityGroupIds:
         - !Ref VPCEndpointSecurityGroup
 
@@ -223,12 +258,12 @@ Resources:
     Type: AWS::EC2::VPCEndpoint
     Condition: CreateEndpoints
     Properties:
-      VpcId: !Ref OpenClawVPC
+      VpcId: !If [CreateNewVPC, !Ref OpenClawVPC, !Ref ExistingVpcId]
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
       SubnetIds:
-        - !Ref PrivateSubnet
+        - !If [CreateNewVPC, !Ref PrivateSubnet, !Ref ExistingSubnetId]
       SecurityGroupIds:
         - !Ref VPCEndpointSecurityGroup
 
@@ -236,12 +271,12 @@ Resources:
     Type: AWS::EC2::VPCEndpoint
     Condition: CreateEndpoints
     Properties:
-      VpcId: !Ref OpenClawVPC
+      VpcId: !If [CreateNewVPC, !Ref OpenClawVPC, !Ref ExistingVpcId]
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssmmessages'
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
       SubnetIds:
-        - !Ref PrivateSubnet
+        - !If [CreateNewVPC, !Ref PrivateSubnet, !Ref ExistingSubnetId]
       SecurityGroupIds:
         - !Ref VPCEndpointSecurityGroup
 
@@ -249,12 +284,12 @@ Resources:
     Type: AWS::EC2::VPCEndpoint
     Condition: CreateEndpoints
     Properties:
-      VpcId: !Ref OpenClawVPC
+      VpcId: !If [CreateNewVPC, !Ref OpenClawVPC, !Ref ExistingVpcId]
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ec2messages'
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
       SubnetIds:
-        - !Ref PrivateSubnet
+        - !If [CreateNewVPC, !Ref PrivateSubnet, !Ref ExistingSubnetId]
       SecurityGroupIds:
         - !Ref VPCEndpointSecurityGroup
 
@@ -362,6 +397,24 @@ Resources:
                 Condition:
                   StringLike:
                     iam:PassedToService: ecs-tasks.amazonaws.com
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DynamoDBForAdminConsoleAndTenantRouter
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:*:${AWS::AccountId}:table/${AWS::StackName}"
+                  - !Sub "arn:aws:dynamodb:*:${AWS::AccountId}:table/${AWS::StackName}/index/*"
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-instance-role"
@@ -469,7 +522,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: "OpenClaw instance security group"
-      VpcId: !Ref OpenClawVPC
+      VpcId: !If [CreateNewVPC, !Ref OpenClawVPC, !Ref ExistingVpcId]
       SecurityGroupIngress:
         - !If
           - AllowSSH
@@ -490,7 +543,10 @@ Resources:
   TenantWorkspaceBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "openclaw-tenants-${AWS::AccountId}"
+      BucketName: !If
+        - HasCustomBucketName
+        - !Ref WorkspaceBucketName
+        - !Sub "openclaw-tenants-${AWS::AccountId}"
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -615,7 +671,7 @@ Resources:
           DeviceIndex: 0
           GroupSet:
             - !Ref OpenClawSecurityGroup
-          SubnetId: !Ref PublicSubnet
+          SubnetId: !If [CreateNewVPC, !Ref PublicSubnet, !Ref ExistingSubnetId]
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
@@ -895,7 +951,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: "Allow NFS from EC2 gateway and ECS tasks to EFS"
-      VpcId: !Ref OpenClawVPC
+      VpcId: !If [CreateNewVPC, !Ref OpenClawVPC, !Ref ExistingVpcId]
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 2049
@@ -929,7 +985,7 @@ Resources:
     Type: AWS::EFS::MountTarget
     Properties:
       FileSystemId: !Ref AlwaysOnEFS
-      SubnetId: !Ref PublicSubnet
+      SubnetId: !If [CreateNewVPC, !Ref PublicSubnet, !Ref ExistingSubnetId]
       SecurityGroups:
         - !Ref AlwaysOnEFSSecurityGroup
 
@@ -938,7 +994,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: "Security group for always-on ECS Fargate tasks"
-      VpcId: !Ref OpenClawVPC
+      VpcId: !If [CreateNewVPC, !Ref OpenClawVPC, !Ref ExistingVpcId]
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 8080
@@ -1213,8 +1269,8 @@ Outputs:
       Name: !Sub "${AWS::StackName}-AlwaysOnEFS"
 
   AlwaysOnSubnetId:
-    Description: "Subnet ID for always-on ECS tasks (public subnet — tasks self-register private IP)"
-    Value: !Ref PublicSubnet
+    Description: "Subnet ID for always-on ECS tasks"
+    Value: !If [CreateNewVPC, !Ref PublicSubnet, !Ref ExistingSubnetId]
     Export:
       Name: !Sub "${AWS::StackName}-AlwaysOnSubnet"
 

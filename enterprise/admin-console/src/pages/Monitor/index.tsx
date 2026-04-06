@@ -254,7 +254,7 @@ export default function Monitor() {
                           </div>
                         </td>
                         <td className="py-3"><span className="text-xs font-mono text-text-muted">{a.soulVersion}</span></td>
-                        <td className="py-3"><span className="text-xs text-text-secondary">${a.costToday.toFixed(2)}</span></td>
+                        <td className="py-3"><span className="text-xs text-text-secondary">${(a.costToday || 0).toFixed(2)}</span></td>
                       </tr>
                     ))}
                   </tbody>

@@ -85,11 +85,11 @@ export default function AgentDetail() {
         </Card>
         <Card>
           <p className="text-xs text-text-muted">Skills</p>
-          <p className="mt-1 text-xl font-bold">{agent.skills.length}</p>
+          <p className="mt-1 text-xl font-bold">{(agent.skills || []).length}</p>
         </Card>
         <Card>
           <p className="text-xs text-text-muted">Channels</p>
-          <p className="mt-1 text-xl font-bold">{agent.channels.length}</p>
+          <p className="mt-1 text-xl font-bold">{(agent.channels || []).length}</p>
         </Card>
         <Card>
           <p className="text-xs text-text-muted">Active Sessions</p>
@@ -180,11 +180,11 @@ export default function AgentDetail() {
             </div>
             <div>
               <p className="text-xs text-text-muted mb-1.5">Channels</p>
-              <div className="flex gap-1.5">{agent.channels.map(c => <Badge key={c} color="info">{CHANNEL_LABELS[c as ChannelType]}</Badge>)}</div>
+              <div className="flex gap-1.5">{(agent.channels || []).map(c => <Badge key={c} color="info">{CHANNEL_LABELS[c as ChannelType]}</Badge>)}</div>
             </div>
             <div>
-              <p className="text-xs text-text-muted mb-1.5">Skills ({agent.skills.length})</p>
-              <div className="flex flex-wrap gap-1.5">{agent.skills.map(s => <Badge key={s} color="success">{s}</Badge>)}</div>
+              <p className="text-xs text-text-muted mb-1.5">Skills ({(agent.skills || []).length})</p>
+              <div className="flex flex-wrap gap-1.5">{(agent.skills || []).map(s => <Badge key={s} color="success">{s}</Badge>)}</div>
             </div>
             <div>
               <p className="text-xs text-text-muted mb-1.5">Tool Permissions</p>

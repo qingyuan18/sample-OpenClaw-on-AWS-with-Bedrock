@@ -312,26 +312,47 @@ draft introductions, or understand each person's role and AI agent capabilities.
 
 ## Engineering
 
-### 张三 (Zhang San) — Solutions Architect · Engineering
-- **Employee ID**: emp-z3  · **Employee No**: EMP-001
-- **Role**: Solutions Architect — pre-sales technical lead, architecture reviews, customer POCs
-- **Agent capabilities**: architecture diagrams, cost calculations, deep research, jina-reader, web search
-- **IM channels**: Telegram, Slack
-- **Best for**: AWS architecture questions, customer technical proposals, solution design reviews
-
-### 王五 (Wang Wu) — Software Engineer · Backend Team
-- **Employee ID**: emp-w5  · **Employee No**: EMP-004
-- **Role**: Backend Software Engineer — API design, microservices, code review
-- **Agent capabilities**: GitHub PR review, code analysis, deep research, shell commands
-- **IM channels**: Slack
-- **Best for**: Code reviews, backend architecture, debugging, technical implementation questions
-
-### JiaDe Wang — Solutions Architect · Engineering
-- **Employee ID**: emp-jiade  · **Employee No**: EMP-030
-- **Role**: Solutions Architect — enterprise AI solutions, AWS Bedrock, AgentCore deployments
+### JiaDe Wang — Solutions Architect · Engineering (Admin)
+- **Employee ID**: emp-jiade  · **Employee No**: EMP-001
+- **Role**: Solutions Architect — enterprise AI solutions, AWS Bedrock, AgentCore deployments. Also IT Admin.
 - **Agent capabilities**: architecture diagrams, cost calculations, deep research, jina-reader
 - **IM channels**: Discord, Slack
-- **Best for**: Enterprise AI architecture, Bedrock/AgentCore questions, OpenClaw Enterprise demos
+- **Best for**: Enterprise AI architecture, Bedrock/AgentCore questions, OpenClaw Enterprise demos, IT support
+
+### Marcus Bell — Solutions Architect · Engineering
+- **Employee ID**: emp-marcus  · **Employee No**: EMP-002
+- **Role**: Solutions Architect — pre-sales technical lead, architecture reviews, customer POCs
+- **Agent capabilities**: architecture diagrams, cost calculations, deep research, jina-reader, web search
+- **IM channels**: Slack, Telegram
+- **Best for**: AWS architecture questions, customer technical proposals, solution design reviews
+
+### Daniel Kim — Solutions Architect · Engineering
+- **Employee ID**: emp-daniel  · **Employee No**: EMP-003
+- **Role**: Solutions Architect — cloud migration projects, infrastructure cost optimization
+- **Agent capabilities**: architecture diagrams, deep research, jina-reader
+- **IM channels**: Slack
+- **Best for**: Cloud migration plans, architecture tradeoffs, cost optimization recommendations
+
+### Ryan Park — Software Engineer · Backend Team
+- **Employee ID**: emp-ryan  · **Employee No**: EMP-004
+- **Role**: Backend Software Engineer — API design, microservices, code review
+- **Agent capabilities**: GitHub PR review, code analysis, deep research, shell commands
+- **IM channels**: Slack, Discord
+- **Best for**: Code reviews, backend architecture, debugging, technical implementation questions
+
+### Sophie Turner — Software Engineer · Backend Team
+- **Employee ID**: emp-sophie  · **Employee No**: EMP-005
+- **Role**: Software Engineer — frontend and backend development, testing
+- **Agent capabilities**: GitHub PR, code review, deep research
+- **IM channels**: Slack
+- **Best for**: Frontend/backend code questions, PR reviews
+
+### Chris Morgan — DevOps Engineer · Platform Team (Admin)
+- **Employee ID**: emp-chris  · **Employee No**: EMP-007
+- **Role**: DevOps Engineer — infrastructure, CI/CD, cloud operations. Also IT Admin.
+- **Agent capabilities**: Terraform, Docker, Kubernetes, GitHub Actions, shell
+- **IM channels**: Slack, Telegram
+- **Best for**: Infrastructure issues, CI/CD pipelines, cloud ops, VPN/credential resets
 
 ### Peter Wu — Executive · Engineering
 - **Employee ID**: emp-peter  · **Employee No**: EMP-031
@@ -344,12 +365,37 @@ draft introductions, or understand each person's role and AI agent capabilities.
 
 ## Product
 
-### 林小雨 (Lin Xiaoyu) — Product Manager · Product
-- **Employee ID**: emp-lin  · **Employee No**: EMP-014
-- **Role**: Product Manager — product roadmap, requirements, feature prioritization
+### Alex Rivera — Product Manager · Product (Manager)
+- **Employee ID**: emp-alex  · **Employee No**: EMP-015
+- **Role**: Product Manager — product roadmap, requirements, feature prioritization. Dept head.
+- **Agent capabilities**: Jira queries, deep research, jina-reader
+- **IM channels**: Slack
+- **Best for**: Product requirements, roadmap questions, feature specs, sprint planning
+
+### Priya Patel — Product Manager · Product
+- **Employee ID**: emp-priya  · **Employee No**: EMP-014
+- **Role**: Product Manager — user research synthesis, transcript analysis, roadmap items
 - **Agent capabilities**: Jira queries, transcript analysis, deep research, jina-reader
-- **IM channels**: Feishu, Slack
-- **Best for**: Product requirements, roadmap questions, feature specs, user story discussions
+- **IM channels**: Slack, Discord
+- **Best for**: User research synthesis, feature specs, user story discussions
+
+---
+
+## Sales
+
+### Mike Johnson — Account Executive · Enterprise Sales (Manager)
+- **Employee ID**: emp-mike  · **Employee No**: EMP-011
+- **Role**: Account Executive — Fortune 500 accounts, deal management, competitive analysis. Sales head.
+- **Agent capabilities**: CRM queries, web search, jina-reader
+- **IM channels**: WhatsApp, Slack
+- **Best for**: CRM data, competitive analysis, deal strategy, enterprise proposals
+
+### Sarah Kim — Account Executive · Enterprise Sales
+- **Employee ID**: emp-sarah  · **Employee No**: EMP-012
+- **Role**: Account Executive — SMB and mid-market accounts, product demos
+- **Agent capabilities**: CRM queries, web search, jina-reader
+- **IM channels**: WhatsApp
+- **Best for**: SMB deal support, product positioning, customer objection handling
 
 ---
 
@@ -366,24 +412,48 @@ draft introductions, or understand each person's role and AI agent capabilities.
 - **Employee ID**: emp-david  · **Employee No**: EMP-017
 - **Role**: Finance Analyst — SAP ERP data, budget monitoring, Excel reports
 - **Agent capabilities**: SAP connector (read-only), Excel report generation, budget tracking
-- **IM channels**: Slack, Portal
+- **IM channels**: Slack
 - **Best for**: Budget variance analysis, cost center reports, financial forecasting
 
 ---
 
-## Administration
+## HR & Admin
 
-### 张三 (Zhang San) — Admin · ACME Corp
-- **Employee ID**: emp-z3  · **Employee No**: EMP-001
-- **Role**: System Administrator with full Admin Console access
-- **Best for**: IT support requests, permission changes, system configuration
+### Jenny Liu — HR Specialist · HR & Admin (Manager)
+- **Employee ID**: emp-jenny  · **Employee No**: EMP-018
+- **Role**: HR Specialist — onboarding, leave policies, employee experience. HR dept head.
+- **Agent capabilities**: web search, email drafting, policy lookup
+- **IM channels**: Slack
+- **Best for**: HR policies, onboarding questions, leave requests, employee handbook
+
+---
+
+## Customer Success
+
+### Emma Chen — Customer Success Manager · Customer Success
+- **Employee ID**: emp-emma  · **Employee No**: EMP-019
+- **Role**: CSM — enterprise account QBRs, health scoring, churn prevention
+- **Agent capabilities**: CRM queries, web search, Slack bridge, jina-reader
+- **IM channels**: Slack, WhatsApp
+- **Best for**: Customer health reports, QBR preparation, account escalations
+
+---
+
+## Legal & Compliance
+
+### Rachel Li — Legal Counsel · Legal & Compliance
+- **Employee ID**: emp-rachel  · **Employee No**: EMP-021
+- **Role**: Legal Counsel — GDPR compliance, vendor contracts, IP protection
+- **Agent capabilities**: deep research, jina-reader, contract analysis
+- **IM channels**: Slack
+- **Best for**: Contract reviews, compliance questions, NDA drafts, regulatory guidance
 
 ---
 
 ## How to Reach Anyone
 
 1. **Via AI agent**: Each employee has an AI agent that handles routine requests on their behalf.
-   Ask their agent via any connected IM channel (Discord, Telegram, Feishu, Slack, Portal).
+   Ask their agent via any connected IM channel (Discord, Telegram, Slack, WhatsApp, Portal).
 
 2. **For urgent matters**: Contact directly via their IM channel listed above.
 
@@ -396,14 +466,17 @@ draft introductions, or understand each person's role and AI agent capabilities.
 
 | Department | Head | Key Contacts |
 |------------|------|-------------|
-| Engineering | Peter Wu (exec-peter) | JiaDe (SA), 张三 (SA), 王五 (SDE) |
-| Backend Team | (under Engineering) | 王五 (SDE) |
-| Product | 林小雨 | 林小雨 (PM) |
+| Engineering | Peter Wu | JiaDe Wang (SA+Admin), Marcus Bell (SA), Ryan Park (SDE), Chris Morgan (DevOps+Admin) |
+| Product | Alex Rivera | Alex Rivera (PM), Priya Patel (PM) |
+| Sales | Mike Johnson | Mike Johnson (AE), Sarah Kim (AE) |
 | Finance | (CFO) | Carol Zhang, David Park |
+| HR & Admin | Jenny Liu | Jenny Liu |
+| Customer Success | (VP CS) | Emma Chen |
+| Legal | (CLO) | Rachel Li |
 
 ---
 
-*Last updated: 2026-03-28. Run `seed_knowledge_docs.py` to refresh after org changes.*
+*Last updated: 2026-04-03. Run `seed_knowledge_docs.py` to refresh after org changes.*
 """),
     ],
 }

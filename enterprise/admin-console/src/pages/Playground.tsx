@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, User, Bot, Shield, Eye, Terminal, Loader, FileText, ChevronDown, ChevronRight, Save, RefreshCw } from 'lucide-react';
+import { Send, User, Bot, Shield, Eye, Terminal, Loader, FileText, ChevronDown, ChevronRight, Save, RefreshCw, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Card, Badge, Button, PageHeader, Select, Tabs } from '../components/ui';
 import { usePlaygroundProfiles, useAgents, useEmployees, usePositions, useWorkspaceFile, useSaveWorkspaceFile } from '../hooks/useApi';
@@ -283,6 +283,13 @@ export default function Playground() {
               placeholder="Send a message to the agent..."
               className="flex-1 rounded-xl border border-dark-border bg-dark-bg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:outline-none"
             />
+            <Button variant="default" onClick={() => {
+              if (tenantId) localStorage.removeItem(`${STORAGE_KEY}_${tenantId}`);
+              const label = tenantOptions.find(o => o.value === tenantId)?.label || tenantId;
+              const p = profiles?.[tenantId];
+              setMessages([{ role: 'system', content: `🔒 Tenant loaded: ${label} — ${p?.role || '?'} role, ${p?.tools?.length || 0} tools`, timestamp: '' }]);
+              setLastPlanE('No messages yet');
+            }}><Trash2 size={16} /></Button>
             <Button variant="primary" onClick={handleSend} disabled={sending}><Send size={16} /></Button>
           </div>
         </Card>

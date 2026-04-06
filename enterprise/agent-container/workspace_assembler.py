@@ -43,9 +43,15 @@ def read_s3(s3, bucket: str, key: str) -> str:
 
 
 def get_tenant_position(ssm, stack_name: str, tenant_id: str) -> str:
-    """Get the position ID for a tenant from SSM.
-    Handles Tenant Router's ID transformation: play__<base_id>__<hash>
-    Tries full ID first, then strips prefix/suffix to find base ID."""
+    """Get the position ID for a tenant.
+
+    Resolution order:
+    1. SSM /tenants/{tenant_id}/position  (exact match)
+    2. Strip prefix → base_id, then SSM /tenants/{base_id}/position
+    3. If base_id is not an emp-id, resolve via DynamoDB user-mapping → emp_id,
+       then read positionId from DynamoDB employees table.
+       (Fixes IM channel users: Feishu OU IDs, Discord numeric IDs, etc.)
+    """
     # Try exact match first
     try:
         resp = ssm.get_parameter(
@@ -56,15 +62,11 @@ def get_tenant_position(ssm, stack_name: str, tenant_id: str) -> str:
         pass
 
     # Strip Tenant Router prefix/suffix: <channel>__<user_id>__<hash>
-    # Examples: play__emp-w5__abc123, port__emp-w5__abc123, tg__emp-w5__abc123
     base_id = tenant_id
     parts = base_id.split("__")
     if len(parts) >= 3:
-        # Format: channel__user_id__hash — extract user_id
         base_id = parts[1]
     elif len(parts) == 2:
-        # Format: channel__user_id (e.g. personal__emp-dickson, portal__emp-jiade)
-        # Take the second part (user_id), not the first (channel prefix)
         base_id = parts[1]
 
     if base_id != tenant_id:
@@ -76,6 +78,52 @@ def get_tenant_position(ssm, stack_name: str, tenant_id: str) -> str:
             return resp["Parameter"]["Value"]
         except ClientError:
             pass
+
+    # If base_id is not an emp-id, it's a channel user ID (e.g. Feishu OU ID).
+    # Resolve via DynamoDB user-mapping → emp_id → positionId.
+    if not base_id.startswith("emp-"):
+        try:
+            import boto3 as _b3wa
+            ddb_region = os.environ.get("DYNAMODB_REGION", "us-east-2")
+            ddb_table = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
+            ddb = _b3wa.resource("dynamodb", region_name=ddb_region)
+            table = ddb.Table(ddb_table)
+
+            # Find the emp_id via MAPPING# scan
+            channel_prefix = parts[0] if len(parts) >= 2 else ""
+            emp_id = ""
+            resp_ddb = table.get_item(
+                Key={"PK": "ORG#acme", "SK": f"MAPPING#{channel_prefix}__{base_id}"})
+            ddb_item = resp_ddb.get("Item")
+            if ddb_item:
+                emp_id = ddb_item.get("employeeId", "")
+            else:
+                from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+                scan = table.query(
+                    KeyConditionExpression=_Key("PK").eq("ORG#acme") & _Key("SK").begins_with("MAPPING#"),
+                    FilterExpression=_Attr("channelUserId").eq(base_id),
+                )
+                if scan.get("Items"):
+                    emp_id = scan["Items"][0].get("employeeId", "")
+
+            if emp_id:
+                logger.info("DynamoDB user-mapping resolved %s → %s", base_id, emp_id)
+                # Get positionId from DynamoDB employees table
+                emp_resp = table.get_item(Key={"PK": "ORG#acme", "SK": f"EMP#{emp_id}"})
+                emp_item = emp_resp.get("Item", {})
+                pos_id = emp_item.get("positionId", "")
+                if pos_id:
+                    logger.info("DynamoDB employee position %s → %s", emp_id, pos_id)
+                    return pos_id
+                # Fallback: SSM for the resolved emp_id
+                try:
+                    resp = ssm.get_parameter(
+                        Name=f"/openclaw/{stack_name}/tenants/{emp_id}/position")
+                    return resp["Parameter"]["Value"]
+                except ClientError:
+                    pass
+        except Exception as e:
+            logger.warning("DynamoDB position resolution failed (non-fatal): %s", e)
 
     logger.info("No position found for tenant %s (base: %s)", tenant_id, base_id)
     return ""
@@ -226,16 +274,37 @@ def assemble_workspace(
         elif len(parts) == 2:
             base_id = parts[1]
 
-        prefix = f"/openclaw/{stack_name}/user-mapping/"
-        paginator = ssm_client.get_paginator("get_parameters_by_path")
+        # Look up all IM connections for this employee from DynamoDB MAPPING#.
+        # Fallback to SSM if DynamoDB returns nothing (pre-migration).
         channel_lines = []
-        for page in paginator.paginate(Path=prefix, Recursive=True):
-            for p in page.get("Parameters", []):
-                if p.get("Value") == base_id:
-                    key = p["Name"].replace(prefix, "")
-                    if "__" in key:
-                        ch, uid = key.split("__", 1)
+        try:
+            import boto3 as _b3ch
+            from boto3.dynamodb.conditions import Key as _KeyC
+            ddb_region = os.environ.get("DYNAMODB_REGION", "us-east-2")
+            ddb_table = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
+            ddb = _b3ch.resource("dynamodb", region_name=ddb_region)
+            table = ddb.Table(ddb_table)
+            scan = table.query(
+                KeyConditionExpression=_KeyC("PK").eq("ORG#acme") & _KeyC("SK").begins_with("MAPPING#"),
+            )
+            for item in scan.get("Items", []):
+                if item.get("employeeId") == base_id:
+                    ch = item.get("channel", "")
+                    uid = item.get("channelUserId", "")
+                    if ch and uid:
                         channel_lines.append(f"- **{ch}**: {uid}")
+        except Exception as e:
+            logger.warning("DynamoDB CHANNELS.md lookup failed, falling back to SSM: %s", e)
+            # SSM fallback
+            prefix = f"/openclaw/{stack_name}/user-mapping/"
+            paginator = ssm_client.get_paginator("get_parameters_by_path")
+            for page in paginator.paginate(Path=prefix, Recursive=True):
+                for p in page.get("Parameters", []):
+                    if p.get("Value") == base_id:
+                        key = p["Name"].replace(prefix, "")
+                        if "__" in key:
+                            ch, uid = key.split("__", 1)
+                            channel_lines.append(f"- **{ch}**: {uid}")
         if channel_lines:
             content = (
                 "# Notification Channels\n\n"
@@ -252,13 +321,131 @@ def assemble_workspace(
     except Exception as e:
         logger.warning("CHANNELS.md generation failed (non-fatal): %s", e)
 
-    # 9. Generate IDENTITY.md if not present
+    # 9. Generate IDENTITY.md — always regenerate so it includes the employee's name.
+    # Without the name, the agent searches the KB to figure out who it is, which can
+    # return stale or wrong data (e.g. "张三" when it's actually WJD via Feishu).
     identity_path = os.path.join(workspace, "IDENTITY.md")
-    if not os.path.isfile(identity_path):
-        identity = f"# Agent Identity\n\n- **Position:** {pos_id}\n- **Tenant:** {tenant_id}\n- **Company:** ACME Corp\n- **Platform:** OpenClaw Enterprise\n"
-        with open(identity_path, "w") as f:
-            f.write(identity)
-        logger.info("Generated IDENTITY.md")
+    emp_name = ""
+    emp_no = ""
+    pos_name = ""
+    # _b_id initialized here so section 10 (SESSION_CONTEXT) can safely reference it
+    # even if the boto3 lookup below throws before setting _b_id
+    _b_id = tenant_id
+    _parts_id = tenant_id.split("__")
+    if len(_parts_id) >= 2:
+        _b_id = _parts_id[1]
+    try:
+        import boto3 as _b3id
+        ddb_region = os.environ.get("DYNAMODB_REGION", "us-east-2")
+        ddb_table = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
+        ddb = _b3id.resource("dynamodb", region_name=ddb_region)
+        table = ddb.Table(ddb_table)
+        # Resolve emp_id from base_id (may already be emp-xxx after user-mapping earlier)
+        _b_id = tenant_id
+        _parts = tenant_id.split("__")
+        if len(_parts) >= 3:
+            _b_id = _parts[1]
+        elif len(_parts) == 2:
+            _b_id = _parts[1]
+        # If not emp-id, try MAPPING# lookup
+        if not _b_id.startswith("emp-"):
+            from boto3.dynamodb.conditions import Key as _KI, Attr as _AI
+            _scan = table.query(
+                KeyConditionExpression=_KI("PK").eq("ORG#acme") & _KI("SK").begins_with("MAPPING#"),
+                FilterExpression=_AI("channelUserId").eq(_b_id),
+            )
+            if _scan.get("Items"):
+                _b_id = _scan["Items"][0].get("employeeId", _b_id)
+        # Look up employee record
+        emp_resp = table.get_item(Key={"PK": "ORG#acme", "SK": f"EMP#{_b_id}"})
+        emp_item = emp_resp.get("Item", {})
+        emp_name = emp_item.get("name", "")
+        emp_no = emp_item.get("employeeNo", "")
+        pos_name = emp_item.get("positionName", pos_id)
+    except Exception as e:
+        logger.warning("IDENTITY.md employee lookup failed (non-fatal): %s", e)
+
+    identity_lines = [
+        "# Agent Identity",
+        "",
+        f"You are **{emp_name}**, a digital employee of ACME Corp." if emp_name else "You are a digital employee of ACME Corp.",
+        "",
+        f"- **Name:** {emp_name}" if emp_name else "",
+        f"- **Employee No:** {emp_no}" if emp_no else "",
+        f"- **Position:** {pos_name or pos_id}",
+        f"- **Company:** ACME Corp",
+        f"- **Platform:** OpenClaw Enterprise",
+    ]
+    identity = "\n".join(line for line in identity_lines if line is not None)
+    with open(identity_path, "w") as f:
+        f.write(identity + "\n")
+    logger.info("Generated IDENTITY.md for %s (%s)", emp_name or _b_id, pos_name or pos_id)
+
+    # 10. Generate SESSION_CONTEXT.md — written once at cold start.
+    # Tells the agent its operating mode and who it is talking to.
+    # The session_id prefix encodes the access path:
+    #   emp__   → normal employee session (Portal + all IM channels share this)
+    #   pt__    → portal session (same as emp__, legacy alias)
+    #   pgnd__  → Playground (IT admin testing as this employee, read-only)
+    #   twin__  → Digital Twin mode (external callers, conversations visible to employee)
+    #   admin__ → IT Admin assistant session
+    session_ctx_path = os.path.join(workspace, "SESSION_CONTEXT.md")
+    try:
+        prefix = tenant_id.split("__")[0] if "__" in tenant_id else ""
+        verified_name = emp_name or _b_id
+
+        if prefix in ("emp", "pt"):
+            session_ctx = (
+                "# Session Context\n\n"
+                f"**Mode:** Employee Session\n"
+                f"**Authenticated User:** {verified_name}\n"
+                f"**Verification:** Confirmed (enterprise identity — SSO or IM binding)\n\n"
+                "You are speaking directly with the authenticated employee listed above. "
+                "Use their name naturally in conversation. "
+                "You have full read/write access to this workspace."
+            )
+        elif prefix == "pgnd":
+            session_ctx = (
+                "# Session Context\n\n"
+                f"**Mode:** Playground (Admin Test)\n"
+                f"**Employee Being Simulated:** {verified_name}\n"
+                f"**Operator:** IT Administrator\n\n"
+                "This is an administrative test session. An IT admin is testing your "
+                "behavior as this employee's agent. Respond as you normally would for "
+                "this employee's role. Do NOT write back to the employee workspace — "
+                "this session is read-only with respect to memory."
+            )
+        elif prefix == "twin":
+            session_ctx = (
+                "# Session Context\n\n"
+                f"**Mode:** Digital Twin\n"
+                f"**Represented Employee:** {verified_name}\n"
+                f"**Caller:** External visitor or colleague (identity unverified)\n\n"
+                f"You are acting as {verified_name}'s digital representative. "
+                "The person you are speaking with may not be the employee themselves — "
+                "they could be a colleague, partner, or visitor interacting with the digital twin. "
+                f"All conversations in this mode are visible to {verified_name} in their Portal."
+            )
+        elif prefix == "admin":
+            session_ctx = (
+                "# Session Context\n\n"
+                "**Mode:** IT Admin Assistant\n"
+                "**Operator:** Authorized IT Administrator\n\n"
+                "You are assisting an IT administrator. You may discuss system configuration, "
+                "employee settings, and platform management topics."
+            )
+        else:
+            session_ctx = (
+                "# Session Context\n\n"
+                f"**Mode:** Standard Session\n"
+                f"**Session ID:** {tenant_id}\n"
+            )
+
+        with open(session_ctx_path, "w") as f:
+            f.write(session_ctx + "\n")
+        logger.info("SESSION_CONTEXT.md written: mode=%s user=%s", prefix or "default", verified_name)
+    except Exception as e:
+        logger.warning("SESSION_CONTEXT.md generation failed (non-fatal): %s", e)
 
     return {
         "merged_soul_chars": len(merged_soul),

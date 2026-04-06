@@ -276,6 +276,14 @@ echo "[entrypoint] Background sync PID=${BG_PID}"
 cleanup() {
     echo "[entrypoint] SIGTERM — flushing workspace"
 
+    # Step 0: Deregister SSM endpoint so Tenant Router stops routing to this container
+    if [ -n "${SHARED_AGENT_ID:-}" ]; then
+        aws ssm delete-parameter \
+            --name "/openclaw/${STACK_NAME}/always-on/${SHARED_AGENT_ID}/endpoint" \
+            --region "$AWS_REGION" 2>/dev/null || true
+        echo "[entrypoint] SSM endpoint deregistered for ${SHARED_AGENT_ID}"
+    fi
+
     # Step 1: Stop server first — no new requests during shutdown
     kill "$SERVER_PID" 2>/dev/null || true
 
@@ -306,11 +314,11 @@ cleanup() {
         if [ "$EFS_MODE" = "true" ]; then
             # EFS → S3 snapshot: only memory + MEMORY.md (other files already in S3 from bootstrap)
             echo "[entrypoint] EFS → S3 cross-mode snapshot..."
-            aws s3 sync "$WORKSPACE/memory/" "${SYNC_TARGET}memory/" \
+            timeout 15 aws s3 sync "$WORKSPACE/memory/" "${SYNC_TARGET}memory/" \
                 --region "$AWS_REGION" --quiet 2>/dev/null || true
-            aws s3 cp "$WORKSPACE/MEMORY.md" "${SYNC_TARGET}MEMORY.md" \
+            timeout 10 aws s3 cp "$WORKSPACE/MEMORY.md" "${SYNC_TARGET}MEMORY.md" \
                 --region "$AWS_REGION" --quiet 2>/dev/null || true
-            aws s3 cp "$WORKSPACE/HEARTBEAT.md" "${SYNC_TARGET}HEARTBEAT.md" \
+            timeout 10 aws s3 cp "$WORKSPACE/HEARTBEAT.md" "${SYNC_TARGET}HEARTBEAT.md" \
                 --region "$AWS_REGION" --quiet 2>/dev/null || true
         else
             # Standard S3 mode: full sync
@@ -344,16 +352,28 @@ if [ -n "${SHARED_AGENT_ID:-}" ] && [ -n "${ECS_CONTAINER_METADATA_URI_V4:-}" ];
         sleep 1
     done
     # Get this task's private IP from ECS metadata v4
-    TASK_IP=$(curl -sf "${ECS_CONTAINER_METADATA_URI_V4}" 2>/dev/null \
-        | python3 -c "
+    # Try task-level endpoint first (/task), then container-level as fallback.
+    # The task endpoint has the ENI details with the private IP.
+    TASK_IP=""
+    for META_URL in "${ECS_CONTAINER_METADATA_URI_V4}/task" "${ECS_CONTAINER_METADATA_URI_V4}"; do
+        TASK_IP=$(curl -sf "$META_URL" 2>/dev/null \
+            | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)
-    nets = data.get('Networks', [])
-    print(nets[0].get('IPv4Addresses', [''])[0] if nets else '')
+    # Task-level: Containers[].Networks[].IPv4Addresses[]
+    for c in data.get('Containers', [data]):
+        for n in c.get('Networks', []):
+            addrs = n.get('IPv4Addresses', [])
+            if addrs:
+                print(addrs[0])
+                sys.exit(0)
+    print('')
 except Exception:
     print('')
 " 2>/dev/null || echo "")
+        if [ -n "$TASK_IP" ]; then break; fi
+    done
     if [ -n "$TASK_IP" ]; then
         ENDPOINT="http://${TASK_IP}:8080"
         aws ssm put-parameter \

@@ -11,6 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import ClawForgeLogo from './ClawForgeLogo';
 import AdminAssistant from './AdminAssistant';
+import { ErrorBoundary } from './ui';
 import clsx from 'clsx';
 
 interface NavItem {
@@ -30,7 +31,7 @@ const ADMIN_NAV: NavItem[] = [
       { label: 'Department Tree', href: '/org/departments' },
       { label: 'Positions', href: '/org/positions' },
       { label: 'Employees', href: '/org/employees' },
-      { label: 'Bindings & Routing', href: '/bindings' },
+      { label: 'Agent Assignments', href: '/bindings' },
     ],
   },
   { label: 'Agent Factory', href: '/agents', icon: <Bot size={20} /> },
@@ -54,7 +55,7 @@ const MANAGER_NAV: NavItem[] = [
     label: 'My Team', icon: <Building2 size={20} />,
     children: [
       { label: 'Employees', href: '/org/employees' },
-      { label: 'Bindings & Routing', href: '/bindings' },
+      { label: 'Agent Assignments', href: '/bindings' },
     ],
   },
   { label: 'Approvals', href: '/approvals', icon: <CheckCircle size={20} /> },
@@ -315,7 +316,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
-          {children}
+          <ErrorBoundary>{children}</ErrorBoundary>
         </main>
       </div>
 

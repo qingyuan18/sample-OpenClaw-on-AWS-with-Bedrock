@@ -30,63 +30,160 @@ logger = logging.getLogger(__name__)
 
 STACK_NAME = os.environ.get("STACK_NAME", "dev")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
+DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", "us-east-2")
 RUNTIME_ID = os.environ.get("AGENTCORE_RUNTIME_ID", "")
 ROUTER_PORT = int(os.environ.get("ROUTER_PORT", "8090"))
 
-# Per-tenant runtime override cache (TTL 5 min to avoid SSM call every message)
+# Per-tenant runtime cache (TTL 5 min)
 _runtime_cache: dict = {}
 _runtime_cache_ts: dict = {}
-_RUNTIME_CACHE_TTL = 300  # seconds
+_RUNTIME_CACHE_TTL = 300
+
+# Routing config cache (full CONFIG#routing item)
+_routing_config: dict = {}
+_routing_config_ts: float = 0.0
+_ROUTING_CONFIG_TTL = 300
+
+
+def _get_routing_config() -> dict:
+    """Read routing config from DynamoDB CONFIG#routing, cached 5 min."""
+    global _routing_config, _routing_config_ts
+    now = time.time()
+    if _routing_config and now - _routing_config_ts < _ROUTING_CONFIG_TTL:
+        return _routing_config
+    try:
+        ddb = boto3.resource("dynamodb", region_name=DYNAMODB_REGION)
+        table = ddb.Table(DYNAMODB_TABLE)
+        resp = table.get_item(Key={"PK": "ORG#acme", "SK": "CONFIG#routing"})
+        item = resp.get("Item", {})
+        _routing_config = {
+            "position_runtime": item.get("position_runtime", {}),
+            "employee_override": item.get("employee_override", {}),
+        }
+        _routing_config_ts = now
+        logger.info("Routing config loaded from DynamoDB: %d positions, %d overrides",
+                    len(_routing_config["position_runtime"]),
+                    len(_routing_config["employee_override"]))
+    except Exception as e:
+        logger.warning("DynamoDB routing config load failed, using cached/empty: %s", e)
+        if not _routing_config:
+            _routing_config = {"position_runtime": {}, "employee_override": {}}
+    return _routing_config
+
+
+def _resolve_emp_id(raw_id: str, channel: str) -> str:
+    """Resolve a raw user ID to employee ID via DynamoDB MAPPING# (fallback: SSM)."""
+    if raw_id.startswith("emp-"):
+        return raw_id
+    # Try DynamoDB: MAPPING#{channel}__{raw_id}
+    try:
+        ddb = boto3.resource("dynamodb", region_name=DYNAMODB_REGION)
+        table = ddb.Table(DYNAMODB_TABLE)
+        resp = table.get_item(Key={"PK": "ORG#acme", "SK": f"MAPPING#{channel}__{raw_id}"})
+        item = resp.get("Item")
+        if item:
+            return item.get("employeeId", "")
+        # Try bare userId (no channel prefix)
+        resp2 = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("PK").eq("ORG#acme")
+            & boto3.dynamodb.conditions.Key("SK").begins_with("MAPPING#"),
+            FilterExpression=boto3.dynamodb.conditions.Attr("channelUserId").eq(raw_id),
+        )
+        items = resp2.get("Items", [])
+        if items:
+            return items[0].get("employeeId", "")
+    except Exception as e:
+        logger.debug("DynamoDB user-mapping lookup failed: %s", e)
+    # SSM fallback
+    try:
+        ssm = boto3.client("ssm", region_name=AWS_REGION)
+        for key in [f"{channel}__{raw_id}", raw_id]:
+            try:
+                resp = ssm.get_parameter(
+                    Name=f"/openclaw/{STACK_NAME}/user-mapping/{key}")
+                return resp["Parameter"]["Value"]
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return ""
+
+
+def _get_position_for_emp(emp_id: str) -> str:
+    """Get positionId for an employee from DynamoDB (fallback: SSM)."""
+    try:
+        ddb = boto3.resource("dynamodb", region_name=DYNAMODB_REGION)
+        table = ddb.Table(DYNAMODB_TABLE)
+        resp = table.get_item(Key={"PK": "ORG#acme", "SK": f"EMP#{emp_id}"})
+        item = resp.get("Item")
+        if item and item.get("positionId"):
+            return item["positionId"]
+    except Exception as e:
+        logger.debug("DynamoDB employee lookup failed: %s", e)
+    # SSM fallback
+    try:
+        ssm = boto3.client("ssm", region_name=AWS_REGION)
+        resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/tenants/{emp_id}/position")
+        return resp["Parameter"]["Value"]
+    except Exception:
+        return ""
 
 
 def _get_runtime_id_for_tenant(base_id: str) -> str:
-    """Resolve runtime ID for a tenant using a 3-tier fallback chain:
+    """Resolve runtime ID for a tenant — 3-tier chain via DynamoDB (SSM fallback).
 
-    1. Employee-level  SSM /tenants/{emp_id}/runtime-id      (explicit per-employee)
-    2. Position-level  SSM /positions/{pos_id}/runtime-id    (set per position in Admin Console)
-    3. Default runtime AGENTCORE_RUNTIME_ID env var
-
-    Position is read from SSM /tenants/{emp_id}/position (written at onboarding).
-    All lookups are cached for 5 minutes to minimise SSM API calls.
+    1. Employee override  DynamoDB CONFIG#routing.employee_override[emp_id]
+    2. Position rule      DynamoDB CONFIG#routing.position_runtime[positionId]
+    3. Default            AGENTCORE_RUNTIME_ID env var
     """
     now = time.time()
     cache_key = f"runtime__{base_id}"
     if cache_key in _runtime_cache and now - _runtime_cache_ts.get(cache_key, 0) < _RUNTIME_CACHE_TTL:
         return _runtime_cache[cache_key]
 
-    ssm = boto3.client("ssm", region_name=AWS_REGION)
+    cfg = _get_routing_config()
 
-    # Tier 1: explicit per-employee override
+    # Tier 1: employee override
+    if base_id in cfg.get("employee_override", {}):
+        runtime = cfg["employee_override"][base_id]
+        _runtime_cache[cache_key] = runtime
+        _runtime_cache_ts[cache_key] = now
+        logger.info("Runtime (employee override DDB) %s → %s", base_id, runtime)
+        return runtime
+
+    # Tier 2: position-level
+    pos_id = _get_position_for_emp(base_id)
+    if pos_id and pos_id in cfg.get("position_runtime", {}):
+        runtime = cfg["position_runtime"][pos_id]
+        _runtime_cache[cache_key] = runtime
+        _runtime_cache_ts[cache_key] = now
+        logger.info("Runtime (position DDB %s) %s → %s", pos_id, base_id, runtime)
+        return runtime
+
+    # SSM fallback (backward compat during transition)
+    ssm = boto3.client("ssm", region_name=AWS_REGION)
     try:
         resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/tenants/{base_id}/runtime-id")
         runtime = resp["Parameter"]["Value"]
         _runtime_cache[cache_key] = runtime
         _runtime_cache_ts[cache_key] = now
-        logger.info("Runtime (employee override) %s → %s", base_id, runtime)
+        logger.info("Runtime (employee SSM fallback) %s → %s", base_id, runtime)
         return runtime
     except Exception:
         pass
+    if pos_id:
+        try:
+            resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/positions/{pos_id}/runtime-id")
+            runtime = resp["Parameter"]["Value"]
+            _runtime_cache[cache_key] = runtime
+            _runtime_cache_ts[cache_key] = now
+            logger.info("Runtime (position SSM fallback %s) %s → %s", pos_id, base_id, runtime)
+            return runtime
+        except Exception:
+            pass
 
-    # Tier 2: position-level runtime
-    try:
-        pos_resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/tenants/{base_id}/position")
-        pos_id = pos_resp["Parameter"]["Value"]
-        pos_cache_key = f"runtime__pos__{pos_id}"
-        if pos_cache_key in _runtime_cache and now - _runtime_cache_ts.get(pos_cache_key, 0) < _RUNTIME_CACHE_TTL:
-            runtime = _runtime_cache[pos_cache_key]
-        else:
-            rt_resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/positions/{pos_id}/runtime-id")
-            runtime = rt_resp["Parameter"]["Value"]
-            _runtime_cache[pos_cache_key] = runtime
-            _runtime_cache_ts[pos_cache_key] = now
-        _runtime_cache[cache_key] = runtime
-        _runtime_cache_ts[cache_key] = now
-        logger.info("Runtime (position %s) %s → %s", pos_id, base_id, runtime)
-        return runtime
-    except Exception:
-        pass
-
-    # Tier 3: default runtime
+    # Tier 3: default
     logger.info("Runtime (default) %s → %s", base_id, RUNTIME_ID)
     return RUNTIME_ID
 
@@ -103,6 +200,8 @@ _CHANNEL_ALIASES = {
     "imessage": "im",
     "googlechat": "gc",
     "webchat": "web",
+    "playground": "pgnd",
+    "twin": "twin",
 }
 
 
@@ -126,9 +225,8 @@ def derive_tenant_id(channel: str, user_id: str) -> str:
     sanitized = re.sub(r"[^a-zA-Z0-9_.\-]", "_", user_id.strip())
 
     # Hash suffix ensures minimum 33 chars for AgentCore runtimeSessionId
-    # 19 hex chars ensures even short channel+user combos reach 33+ chars
-    from datetime import date as _d
-    hash_suffix = hashlib.sha256(f"{channel}:{user_id}:{_d.today().strftime('%Y%m%d')}".encode()).hexdigest()[:19]
+    # Stable across days — Session Storage persists across stop/resume cycles
+    hash_suffix = hashlib.sha256(f"{channel}:{user_id}".encode()).hexdigest()[:19]
     tenant_id = f"{channel_short}__{sanitized}__{hash_suffix}"
 
     # Pad to 33 chars minimum if still too short
@@ -383,6 +481,8 @@ class TenantRouterHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/route":
             self._handle_route()
+        elif self.path == "/stop-session":
+            self._handle_stop_session()
         else:
             self._respond(404, {"error": "not found"})
 
@@ -407,9 +507,25 @@ class TenantRouterHandler(BaseHTTPRequestHandler):
             self._respond(400, {"error": "message required"})
             return
 
-        # Derive tenant and route
+        # Resolve IM channel user IDs (Feishu OU IDs, Discord numeric IDs, etc.) to emp_id.
+        resolved_emp_id = _resolve_emp_id(user_id, channel)
+
         try:
-            tenant_id = derive_tenant_id(channel, user_id)
+            if resolved_emp_id:
+                # Twin and Playground get isolated sessions so they don't pollute
+                # the employee's real conversation history. workspace_assembler.py
+                # and server.py detect these prefixes (twin__, pgnd__) to inject
+                # mode-specific context (e.g. digital twin persona, read-only notice).
+                if channel in ("twin", "playground"):
+                    tenant_id = derive_tenant_id(channel, resolved_emp_id)
+                else:
+                    # Employee-scoped session: all IM channels + Portal share ONE
+                    # AgentCore session, preserving cross-channel context.
+                    tenant_id = derive_tenant_id("emp", resolved_emp_id)
+            else:
+                # Fallback for users not yet in DynamoDB user-mapping (e.g. new users
+                # before pairing, or admin test accounts).
+                tenant_id = derive_tenant_id(channel, user_id)
         except ValueError as e:
             self._respond(400, {"error": str(e)})
             return
@@ -431,6 +547,63 @@ class TenantRouterHandler(BaseHTTPRequestHandler):
             })
         except RuntimeError as e:
             self._respond(502, {"error": str(e), "tenant_id": tenant_id})
+
+    def _handle_stop_session(self):
+        """Stop an AgentCore session to force workspace refresh on next invoke.
+        Used by Admin Console after config changes (USER.md, permissions, model override).
+        POST /stop-session { "emp_id": "emp-carol" }
+        """
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            self._respond(400, {"error": "invalid json"})
+            return
+
+        emp_id = payload.get("emp_id", "")
+        if not emp_id:
+            self._respond(400, {"error": "emp_id required"})
+            return
+
+        stopped = []
+        errors = []
+
+        # Stop all session types for this employee (emp, twin, pgnd)
+        for channel in ["emp", "twin", "playground"]:
+            try:
+                session_id = derive_tenant_id(channel, emp_id)
+                # Resolve the runtime for this employee
+                effective_runtime = _get_runtime_id_for_tenant(emp_id) or RUNTIME_ID
+                if not effective_runtime:
+                    continue
+
+                try:
+                    import boto3 as _b3stop
+                    sts = _b3stop.client("sts", region_name=AWS_REGION)
+                    account_id = sts.get_caller_identity()["Account"]
+                    runtime_arn = f"arn:aws:bedrock-agentcore:{AWS_REGION}:{account_id}:runtime/{effective_runtime}"
+
+                    client = _agentcore_client()
+                    client.stop_runtime_session(
+                        agentRuntimeArn=runtime_arn,
+                        runtimeSessionId=session_id,
+                    )
+                    stopped.append(session_id)
+                    logger.info("Stopped session %s for %s", session_id, emp_id)
+                except Exception as e:
+                    # Session may not exist — that's fine
+                    err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+                    if err_code not in ("ResourceNotFoundException", "ValidationException"):
+                        errors.append(f"{channel}: {e}")
+                    logger.debug("Stop session %s: %s", session_id, e)
+            except Exception as e:
+                errors.append(f"{channel}: {e}")
+
+        self._respond(200, {
+            "emp_id": emp_id,
+            "stopped": stopped,
+            "errors": errors,
+        })
 
     def _respond(self, status: int, body: dict):
         data = json.dumps(body, default=str).encode()

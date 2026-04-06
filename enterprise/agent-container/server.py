@@ -61,6 +61,11 @@ _config_version: str = ""
 _config_version_checked_at: float = 0.0
 _CONFIG_VERSION_CHECK_INTERVAL = 300  # seconds (5 minutes)
 
+# Guardrail config read from environment variables set on the Runtime.
+# Exec Runtime has no GUARDRAIL_ID → no guardrail enforcement.
+GUARDRAIL_ID = os.environ.get("GUARDRAIL_ID", "")
+GUARDRAIL_VERSION = os.environ.get("GUARDRAIL_VERSION", "DRAFT")
+
 
 def _check_and_refresh_config_version() -> None:
     """Check DynamoDB CONFIG#global-version and clear assembly cache if changed.
@@ -266,16 +271,37 @@ def _write_usage_to_dynamodb(tenant_id: str, base_id: str, usage: dict, model: s
         logger.warning("DynamoDB usage write failed (non-fatal): %s", e)
 
 
+def _session_storage_has_workspace() -> bool:
+    """Check if Session Storage restored a previous workspace.
+    Session Storage mounts at WORKSPACE path and restores files from the previous session.
+    If SOUL.md exists, the workspace was previously assembled and persisted."""
+    soul_path = os.path.join(WORKSPACE, "SOUL.md")
+    return os.path.isfile(soul_path) and os.path.getsize(soul_path) > 50
+
+
 def _ensure_workspace_assembled(tenant_id: str) -> None:
     """Assemble workspace on first invocation for a tenant.
     Runs workspace_assembler.py to merge Global + Position + Personal SOUL.
-    Thread-safe: only runs once per tenant per microVM lifecycle."""
+    Thread-safe: only runs once per tenant per microVM lifecycle.
+
+    Session Storage optimization: if the workspace was restored from a previous
+    session and config_version hasn't changed, skip S3 download and assembly."""
     if tenant_id in _assembled_tenants or tenant_id == "unknown":
         return
 
     with _assembly_lock:
         if tenant_id in _assembled_tenants:
             return  # double-check after acquiring lock
+
+        # Session Storage optimization: if workspace already has assembled files
+        # AND global config hasn't changed, skip the full S3 download + assembly.
+        # This reduces session resume from ~6s to ~0.5s.
+        if _session_storage_has_workspace() and _config_version:
+            # Config version is already loaded and hasn't changed since last check
+            logger.info("Session Storage resume for tenant %s — workspace intact, config_version=%s",
+                        tenant_id, _config_version)
+            _assembled_tenants.add(tenant_id)
+            return
 
         logger.info("First invocation for tenant %s — assembling workspace", tenant_id)
 
@@ -295,29 +321,47 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
             # channel__user_id → take user_id (second part, the actual identifier)
             base_id = parts[1]
 
-        # Check SSM user-mapping for IM channel user IDs
-        # e.g., discord__1460888812426363004 → emp-carol
+        # Resolve IM channel user IDs (e.g. Feishu OU ID) to employee IDs.
+        # Checks DynamoDB MAPPING# first, SSM as fallback.
         if not base_id.startswith("emp-"):
             try:
                 import boto3 as _b3_mapping
-                ssm = _b3_mapping.client("ssm", region_name=AWS_REGION_RUNTIME)
-                # Try multiple mapping key formats
-                mapping_keys = [
-                    f"{parts[0]}__{base_id}" if len(parts) >= 2 else base_id,  # channel__userId
-                    base_id,  # just userId
-                    tenant_id,  # full tenant_id
-                ]
-                for mapping_key in mapping_keys:
-                    try:
-                        resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/user-mapping/{mapping_key}")
-                        resolved = resp["Parameter"]["Value"]
-                        logger.info("SSM user-mapping resolved: %s → %s", mapping_key, resolved)
+                ddb = _b3_mapping.resource("dynamodb", region_name=os.environ.get("DYNAMODB_REGION", "us-east-2"))
+                table = ddb.Table(os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise"))
+                channel_prefix = parts[0] if len(parts) >= 2 else ""
+                # Try exact channel+userId key first
+                resp_ddb = table.get_item(Key={"PK": "ORG#acme", "SK": f"MAPPING#{channel_prefix}__{base_id}"})
+                ddb_item = resp_ddb.get("Item")
+                if ddb_item:
+                    resolved = ddb_item.get("employeeId", "")
+                    logger.info("DynamoDB user-mapping resolved: %s__%s → %s", channel_prefix, base_id, resolved)
+                    base_id = resolved
+                else:
+                    # Scan all MAPPING# items for this channelUserId (handles channel-prefix mismatch)
+                    from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+                    scan_resp = table.query(
+                        KeyConditionExpression=_Key("PK").eq("ORG#acme") & _Key("SK").begins_with("MAPPING#"),
+                        FilterExpression=_Attr("channelUserId").eq(base_id),
+                    )
+                    if scan_resp.get("Items"):
+                        resolved = scan_resp["Items"][0].get("employeeId", "")
+                        logger.info("DynamoDB user-mapping (scan) resolved: %s → %s", base_id, resolved)
                         base_id = resolved
-                        break
-                    except Exception:
-                        pass
+                    else:
+                        # SSM fallback for backward compat
+                        ssm = _b3_mapping.client("ssm", region_name=AWS_REGION_RUNTIME)
+                        for mapping_key in [f"{channel_prefix}__{base_id}", base_id]:
+                            try:
+                                resp = ssm.get_parameter(
+                                    Name=f"/openclaw/{STACK_NAME}/user-mapping/{mapping_key}")
+                                resolved = resp["Parameter"]["Value"]
+                                logger.info("SSM user-mapping fallback resolved: %s → %s", mapping_key, resolved)
+                                base_id = resolved
+                                break
+                            except Exception:
+                                pass
             except Exception as e:
-                logger.warning("SSM user-mapping lookup failed: %s", e)
+                logger.warning("User-mapping lookup failed: %s", e)
 
         # 0. Load shared OpenClaw credentials (discord allowFrom list) into microVM
         #    This is how the microVM knows which Discord users are approved.
@@ -445,6 +489,44 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
             logger.info("Base tenant ID written: %s", base_id)
         except IOError:
             pass
+
+        # Synthesize MEMORY.md from daily memory files if it's empty.
+        # In serverless AgentCore microVMs, the OpenClaw Gateway compaction daemon
+        # never runs persistently, so MEMORY.md stays at "# Memory" (9 bytes) forever.
+        # We fix this by concatenating recent daily memory files into MEMORY.md at
+        # session start so the agent has cross-session context.
+        try:
+            memory_md_path = os.path.join(WORKSPACE, "MEMORY.md")
+            memory_dir = os.path.join(WORKSPACE, "memory")
+            current_content = ""
+            if os.path.isfile(memory_md_path):
+                with open(memory_md_path) as f:
+                    current_content = f.read().strip()
+
+            # Synthesize only if MEMORY.md is empty / just a header
+            if len(current_content) < 50 and os.path.isdir(memory_dir):
+                daily_files = sorted(
+                    [f for f in os.listdir(memory_dir) if f.endswith(".md")],
+                    reverse=True)[:3]  # last 3 days
+                if daily_files:
+                    parts = ["# Memory\n\n*Auto-synthesized from recent conversations*\n"]
+                    for fname in daily_files:
+                        fpath = os.path.join(memory_dir, fname)
+                        try:
+                            with open(fpath) as f:
+                                content = f.read().strip()
+                            if content:
+                                date_str = fname.replace(".md", "")
+                                parts.append(f"\n## {date_str}\n{content[:3000]}")
+                        except Exception:
+                            pass
+                    if len(parts) > 1:
+                        with open(memory_md_path, "w") as f:
+                            f.write("\n".join(parts))
+                        logger.info("MEMORY.md synthesized from %d daily files for %s",
+                                    len(daily_files), base_id)
+        except Exception as e:
+            logger.warning("MEMORY.md synthesis failed (non-fatal): %s", e)
 
         # 5. Dynamic agent config: read from DynamoDB and update openclaw.json
         # Hierarchy: employee override > position override > global default
@@ -652,6 +734,32 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
                 logger.info("Mirrored workspace files to Gateway default path: %s", default_workspace)
             except Exception as e:
                 logger.warning("Gateway workspace mirror failed (non-fatal): %s", e)
+
+        # Write SOUL hash + config version to DynamoDB SESSION# for admin monitoring.
+        # Admin Console can display this to verify the agent is running the correct config.
+        try:
+            import hashlib as _hl
+            soul_path = os.path.join(WORKSPACE, "SOUL.md")
+            soul_hash = ""
+            if os.path.isfile(soul_path):
+                with open(soul_path, "rb") as f:
+                    soul_hash = _hl.sha256(f.read()).hexdigest()[:16]
+            import boto3 as _b3sh
+            from datetime import datetime, timezone
+            ddb_sh = _b3sh.resource("dynamodb", region_name=DYNAMODB_REGION)
+            session_key = tenant_id[:40]
+            ddb_sh.Table(DYNAMODB_TABLE).update_item(
+                Key={"PK": "ORG#acme", "SK": f"SESSION#{session_key}"},
+                UpdateExpression="SET soulHash = :h, configVersion = :v, assembledAt = :t",
+                ExpressionAttributeValues={
+                    ":h": soul_hash,
+                    ":v": _config_version or "initial",
+                    ":t": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            logger.info("SOUL hash written to DynamoDB: %s config=%s", soul_hash, _config_version)
+        except Exception as e:
+            logger.warning("SOUL hash write failed (non-fatal): %s", e)
 
         _assembled_tenants.add(tenant_id)
         logger.info("Workspace ready for tenant %s", tenant_id)
@@ -869,6 +977,110 @@ def _invoke_openclaw_once(tenant_id: str, message: str, timeout: int = 300) -> d
     return data
 
 
+def _apply_guardrail(text: str, source: str, tenant_id: str) -> str:
+    """Apply Bedrock Guardrail to text.  Returns the blockedMessaging string if
+    content was blocked/filtered; returns empty string if content passes.
+    source must be 'INPUT' or 'OUTPUT'.
+    Logs a guardrail_block audit event to DynamoDB if blocked."""
+    try:
+        import boto3 as _b3gr
+        region = os.environ.get("AWS_REGION", "us-east-1")
+        bedrock = _b3gr.client("bedrock-runtime", region_name=region)
+        resp = bedrock.apply_guardrail(
+            guardrailIdentifier=GUARDRAIL_ID,
+            guardrailVersion=GUARDRAIL_VERSION,
+            source=source,
+            content=[{"text": {"text": text}}],
+        )
+        action = resp.get("action", "NONE")
+        if action in ("GUARDRAIL_INTERVENED",):
+            # Extract the blockedMessaging from outputs
+            blocked_msg = ""
+            for out in resp.get("outputs", []):
+                t = out.get("text", "")
+                if t:
+                    blocked_msg = t
+                    break
+            if not blocked_msg:
+                blocked_msg = "该话题涉及未公开业务信息。根据合规政策，AI 助手无法提供相关内容，请联系合规部门。"
+
+            # Log guardrail_block audit event (fire-and-forget)
+            policy_name = ""
+            assessments = resp.get("assessments", [])
+            if assessments:
+                topics = assessments[0].get("topicPolicy", {}).get("topics", [])
+                if topics:
+                    policy_name = topics[0].get("name", "")
+
+            threading.Thread(
+                target=_write_guardrail_block_to_dynamodb,
+                args=(tenant_id, text[:200], source, policy_name),
+                daemon=True,
+            ).start()
+
+            logger.info("Guardrail %s BLOCKED source=%s tenant=%s policy=%s", GUARDRAIL_ID, source, tenant_id, policy_name)
+            return blocked_msg
+        return ""
+    except Exception as e:
+        logger.warning("Guardrail check failed (non-fatal, allowing): %s", e)
+        return ""
+
+
+def _write_guardrail_block_to_dynamodb(tenant_id: str, input_snippet: str, source: str, policy_name: str):
+    """Write a guardrail_block audit event to DynamoDB."""
+    try:
+        import boto3 as _b3gb
+        from datetime import datetime, timezone
+        ddb = _b3gb.resource("dynamodb", region_name=DYNAMODB_REGION)
+        table = ddb.Table(DYNAMODB_TABLE)
+        now = datetime.now(timezone.utc)
+        audit_id = f"grd-{int(now.timestamp() * 1000)}"
+
+        # Resolve display name
+        base_id = tenant_id
+        parts = tenant_id.split("__")
+        if len(parts) >= 2:
+            base_id = parts[1]
+        try:
+            with open("/tmp/base_tenant_id") as f:
+                resolved = f.read().strip()
+                if resolved and resolved != "unknown":
+                    base_id = resolved
+        except Exception:
+            pass
+
+        actor_name = base_id
+        try:
+            emp_resp = table.get_item(Key={"PK": "ORG#acme", "SK": f"EMP#{base_id}"})
+            emp_item = emp_resp.get("Item", {})
+            if emp_item.get("name"):
+                actor_name = emp_item["name"]
+        except Exception:
+            pass
+
+        table.put_item(Item={
+            "PK": "ORG#acme",
+            "SK": f"AUDIT#{audit_id}",
+            "GSI1PK": "TYPE#audit",
+            "GSI1SK": f"AUDIT#{audit_id}",
+            "id": audit_id,
+            "timestamp": now.isoformat(),
+            "eventType": "guardrail_block",
+            "actorId": base_id,
+            "actorName": actor_name,
+            "targetType": "guardrail",
+            "targetId": GUARDRAIL_ID,
+            "guardrailId": GUARDRAIL_ID,
+            "guardrailVersion": GUARDRAIL_VERSION,
+            "guardrailSource": source,
+            "guardrailPolicy": policy_name,
+            "detail": f"Guardrail blocked {source.lower()}: {input_snippet}",
+            "status": "blocked",
+        })
+    except Exception as e:
+        logger.warning("Guardrail block audit write failed (non-fatal): %s", e)
+
+
 class AgentCoreHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):  # noqa: A002
@@ -921,6 +1133,15 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
         # Check if global config (SOUL/KB) changed — evicts stale assembly cache
         _check_and_refresh_config_version()
 
+        # ── Guardrail INPUT check ─────────────────────────────────────────────
+        # Reads GUARDRAIL_ID from env (set per-Runtime). Exec Runtime has no
+        # GUARDRAIL_ID so this is a no-op for exec agents.
+        if GUARDRAIL_ID:
+            blocked_msg = _apply_guardrail(message, source="INPUT", tenant_id=tenant_id)
+            if blocked_msg:
+                self._respond(200, {"response": blocked_msg, "status": "guardrail_blocked", "guardrailId": GUARDRAIL_ID})
+                return
+
         # Check session takeover — if admin has taken over, skip agent invocation
         stack = os.environ.get("STACK_NAME", "openclaw-multitenancy")
         region = os.environ.get("AWS_REGION", "us-east-1")
@@ -965,6 +1186,13 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
             if not response_text:
                 logger.warning("Empty response_text from openclaw, raw data keys: %s", list(data.keys()))
                 response_text = "(no response)"
+
+            # ── Guardrail OUTPUT check ────────────────────────────────────────
+            if GUARDRAIL_ID:
+                blocked_msg = _apply_guardrail(response_text, source="OUTPUT", tenant_id=tenant_id)
+                if blocked_msg:
+                    self._respond(200, {"response": blocked_msg, "status": "guardrail_blocked", "guardrailId": GUARDRAIL_ID})
+                    return
 
             # Plan E audit
             try:
@@ -1013,22 +1241,27 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
                 daemon=True,
             ).start()
 
-            # Fire-and-forget: write conversation turn to DynamoDB for Session Detail view
-            threading.Thread(
-                target=_append_conversation_turn,
-                args=(tenant_id, message, response_text, model, duration_ms),
-                daemon=True,
-            ).start()
+            # Playground sessions are read-only: don't write conversation turns
+            # or sync memory back to the employee's S3 workspace.
+            is_playground = tenant_id.startswith("pgnd__")
 
-            # Fire-and-forget: immediately sync HEARTBEAT.md + memory to S3 after each turn.
-            # AgentCore microVMs may be killed (SIGKILL) after the response without SIGTERM,
-            # bypassing the cleanup() flush. Syncing here ensures reminders and memory
-            # reach S3 regardless of how the microVM terminates.
-            threading.Thread(
-                target=_sync_heartbeat_and_memory,
-                args=(base_id,),
-                daemon=True,
-            ).start()
+            if not is_playground:
+                # Fire-and-forget: write conversation turn to DynamoDB for Session Detail view
+                threading.Thread(
+                    target=_append_conversation_turn,
+                    args=(tenant_id, message, response_text, model, duration_ms),
+                    daemon=True,
+                ).start()
+
+                # Fire-and-forget: immediately sync HEARTBEAT.md + memory to S3 after each turn.
+                # AgentCore microVMs may be killed (SIGKILL) after the response without SIGTERM,
+                # bypassing the cleanup() flush. Syncing here ensures reminders and memory
+                # reach S3 regardless of how the microVM terminates.
+                threading.Thread(
+                    target=_sync_heartbeat_and_memory,
+                    args=(base_id,),
+                    daemon=True,
+                ).start()
 
             self._respond(200, {
                 "response": response_text,

@@ -36,6 +36,7 @@ export interface Employee {
   agentId: string | null;
   agentStatus: 'active' | 'idle' | 'archived';
   personalPrefs: string;      // USER.md summary
+  role?: 'admin' | 'manager' | 'employee';
   createdAt: string;
 }
 
@@ -55,10 +56,12 @@ export interface Agent {
   qualityScore: number | null;
   createdAt: string;
   updatedAt: string;
-  // Always-on shared agent fields
-  deployMode?: 'personal' | 'always-on';
+  // Always-on agent fields (ECS Fargate)
+  deployMode?: 'personal' | 'always-on' | 'always-on-ecs' | 'serverless';
   containerPort?: number;
-  containerStatus?: 'starting' | 'running' | 'stopped' | 'error';
+  containerStatus?: 'starting' | 'running' | 'stopped' | 'error' | 'reloading';
+  ecsServiceName?: string;
+  ecsTaskArn?: string;
 }
 
 export interface SoulLayer {
@@ -105,12 +108,12 @@ export interface LiveSession {
 export interface AuditEntry {
   id: string;
   timestamp: string;
-  eventType: 'agent_invocation' | 'tool_execution' | 'config_change' | 'permission_denied' | 'approval_decision' | 'session_start' | 'session_end';
+  eventType: 'agent_invocation' | 'tool_execution' | 'config_change' | 'permission_denied' | 'approval_decision' | 'session_start' | 'session_end' | 'guardrail_block';
   actorId: string;
-  actorName: string;
-  targetType: 'agent' | 'employee' | 'position' | 'department' | 'skill' | 'binding' | 'system';
+  actorName: string | null;
+  targetType: 'agent' | 'employee' | 'position' | 'department' | 'skill' | 'binding' | 'system' | 'guardrail';
   targetId: string;
-  detail: string;
+  detail: string | null;
   status: 'success' | 'blocked' | 'warning' | 'info';
 }
 

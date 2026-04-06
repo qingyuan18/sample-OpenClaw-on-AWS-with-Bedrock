@@ -1,10 +1,10 @@
 import { useState, useCallback } from 'react';
-import { Link2, Plus, Users, User, GitBranch, Smartphone, Trash2 } from 'lucide-react';
+import { Link2, Users, Zap, Smartphone, Trash2, RefreshCw } from 'lucide-react';
 import { IM_ICONS } from '../components/IMIcons';
 import { Card, StatCard, Badge, Button, PageHeader, Table, Modal, Select, Tabs, StatusDot } from '../components/ui';
-import { useBindings, useEmployees, useAgents, usePositions, useCreateBinding, useBulkProvision, useRoutingRules, useUserMappings, useCreateUserMapping, useDeleteUserMapping, useApprovePairing } from '../hooks/useApi';
+import { useBindings, useEmployees, useAgents, usePositions, useBulkProvision, useRoutingRules, useUserMappings, useCreateUserMapping, useDeleteUserMapping, useApprovePairing } from '../hooks/useApi';
 import { CHANNEL_LABELS } from '../types';
-import type { Binding, ChannelType } from '../types';
+import type { ChannelType } from '../types';
 
 // Inline component for IM mapping table with per-row confirm-to-revoke
 function RevokeTable({ mappings, employees, onRevoke, isPending }: {
@@ -49,14 +49,10 @@ function RevokeTable({ mappings, employees, onRevoke, isPending }: {
                     onClick={() => { onRevoke(r); setConfirming(null); }}>
                     Confirm
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>
-                    Cancel
-                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>No</Button>
                 </>
               ) : (
-                <Button variant="ghost" size="sm"
-                  className="text-text-muted hover:text-danger hover:border-danger/30"
-                  onClick={() => setConfirming(rKey)}>
+                <Button variant="ghost" size="sm" onClick={() => setConfirming(rKey)}>
                   <Trash2 size={13} /> Revoke
                 </Button>
               )}
@@ -68,19 +64,18 @@ function RevokeTable({ mappings, employees, onRevoke, isPending }: {
   );
 }
 
+
 export default function Bindings() {
-  const { data: BINDINGS = [] } = useBindings();
   const { data: EMPLOYEES = [] } = useEmployees();
   const { data: AGENTS = [] } = useAgents();
   const { data: POSITIONS = [] } = usePositions();
-  const createBinding = useCreateBinding();
-  const bulkProvision = useBulkProvision();
   const { data: routingRules = [] } = useRoutingRules();
   const { data: userMappings = [] } = useUserMappings();
+  const bulkProvision = useBulkProvision();
   const createUserMapping = useCreateUserMapping();
   const deleteUserMapping = useDeleteUserMapping();
   const approvePairing = useApprovePairing();
-  const [showCreate, setShowCreate] = useState(false);
+
   const [showBulk, setShowBulk] = useState(false);
   const [showMapping, setShowMapping] = useState(false);
   const [showPairing, setShowPairing] = useState(false);
@@ -96,67 +91,68 @@ export default function Bindings() {
   const [bulkPos, setBulkPos] = useState('');
   const [bulkChannel, setBulkChannel] = useState('slack');
   const [bulkResult, setBulkResult] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState('all');
-  const [selEmp, setSelEmp] = useState('');
-  const [selAgent, setSelAgent] = useState('');
-  const [selChannel, setSelChannel] = useState('');
-  const [selMode, setSelMode] = useState('1:1');
+  const [activeTab, setActiveTab] = useState('employees');
 
-  const empOptions = EMPLOYEES.map(e => ({ label: `${e.name} (${e.positionName})`, value: e.id }));
-  const agentOptions = AGENTS.map(a => ({ label: a.name, value: a.id }));
   const channelOptions = Object.entries(CHANNEL_LABELS).map(([v, l]) => ({ label: l, value: v }));
 
-  const oneToOne = BINDINGS.filter(b => b.mode === '1:1');
-  const shared = BINDINGS.filter(b => b.mode === 'N:1');
-  const multi = BINDINGS.filter(b => b.mode === '1:N');
+  // Classify employees by deployment mode
+  const alwaysOnAgentIds = new Set(AGENTS.filter(a => a.deployMode === 'always-on-ecs').map(a => a.id));
+  const serverlessCount = EMPLOYEES.filter(e => e.agentId && !alwaysOnAgentIds.has(e.agentId)).length;
+  const alwaysOnCount = EMPLOYEES.filter(e => e.agentId && alwaysOnAgentIds.has(e.agentId)).length;
+  const unboundCount = EMPLOYEES.filter(e => !e.agentId).length;
+  const imConnectedCount = userMappings.length;
 
-  const tabData: Record<string, Binding[]> = {
-    all: BINDINGS, private: oneToOne, shared, multi,
-  };
-
-  const columns = [
-    { key: 'employee', label: 'Employee', render: (b: Binding) => <span className="font-medium">{b.employeeName}</span> },
-    { key: 'arrow', label: '', render: () => <span className="text-text-muted">↔</span>, width: '40px' },
-    { key: 'agent', label: 'Agent', render: (b: Binding) => <span className="font-medium">{b.agentName}</span> },
-    { key: 'mode', label: 'Mode', render: (b: Binding) => (
-      <Badge color={b.mode === '1:1' ? 'success' : b.mode === 'N:1' ? 'info' : 'default'}>{b.mode}</Badge>
-    )},
-    { key: 'channel', label: 'Channel', render: (b: Binding) => <Badge color="info">{CHANNEL_LABELS[b.channel as ChannelType]}</Badge> },
-    { key: 'status', label: 'Status', render: (b: Binding) => <StatusDot status={b.status} /> },
-    { key: 'source', label: 'Source', render: (b: Binding) => {
-      const src = (b as any).source;
-      return src?.startsWith('auto') ? <Badge color="info">Auto</Badge> : <Badge>Manual</Badge>;
+  const employeeColumns = [
+    { key: 'name', label: 'Employee', render: (e: any) => <span className="font-medium">{e.name}</span> },
+    { key: 'position', label: 'Position', render: (e: any) => <span className="text-text-secondary">{e.positionName}</span> },
+    { key: 'dept', label: 'Department', render: (e: any) => <span className="text-text-muted text-xs">{e.departmentName}</span> },
+    { key: 'agent', label: 'Agent', render: (e: any) => {
+      if (!e.agentId) return <Badge color="default">No agent</Badge>;
+      const agent = AGENTS.find((a: any) => a.id === e.agentId);
+      return <span className="text-sm">{agent?.name || e.agentId}</span>;
     }},
-    { key: 'created', label: 'Created', render: (b: Binding) => <span className="text-text-muted text-xs">{new Date(b.createdAt).toLocaleDateString()}</span> },
+    { key: 'mode', label: 'Mode', render: (e: any) => {
+      if (!e.agentId) return <Badge color="default">—</Badge>;
+      const agent = AGENTS.find((a: any) => a.id === e.agentId);
+      if (agent?.deployMode === 'always-on-ecs') {
+        return <Badge color="info"><Zap size={10} className="mr-1 inline" />Always-on</Badge>;
+      }
+      return <Badge color="success">Serverless</Badge>;
+    }},
+    { key: 'im', label: 'IM Connected', render: (e: any) => {
+      const channels = userMappings.filter((m: any) => m.employeeId === e.id);
+      if (channels.length === 0) return <span className="text-text-muted text-xs">—</span>;
+      return (
+        <div className="flex gap-1">
+          {channels.map((m: any) => <Badge key={m.channel + m.channelUserId} color="info">{m.channel}</Badge>)}
+        </div>
+      );
+    }},
   ];
 
   return (
     <div>
       <PageHeader
-        title="Bindings & Routing"
-        description="Manage employee-agent bindings and message routing rules"
+        title="Agent Assignments"
+        description="Every employee automatically gets a Serverless agent. Admin can upgrade to Always-on (Fargate) for scheduled tasks and instant response."
         actions={
           <div className="flex gap-3">
-            <Button variant="default" onClick={() => setShowBulk(true)}>Bulk Assign by Position</Button>
-            <Button variant="primary" onClick={() => setShowCreate(true)}><Plus size={16} /> Create Binding</Button>
+            <Button variant="default" onClick={() => setShowBulk(true)}>Bulk Provision</Button>
           </div>
         }
       />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-6">
-        <StatCard title="Total Bindings" value={BINDINGS.length} icon={<Link2 size={22} />} color="primary" />
-        <StatCard title="1:1 Private" value={oneToOne.length} icon={<User size={22} />} color="success" />
-        <StatCard title="N:1 Shared" value={shared.length} icon={<Users size={22} />} color="info" />
-        <StatCard title="Bound" value={BINDINGS.filter(b => b.status === 'bound' || b.status === 'active').length} icon={<Link2 size={22} />} color="cyan" />
+        <StatCard title="Total Employees" value={EMPLOYEES.length} icon={<Users size={22} />} color="primary" />
+        <StatCard title="Serverless" value={serverlessCount} icon={<RefreshCw size={22} />} color="success" />
+        <StatCard title="Always-on" value={alwaysOnCount} icon={<Zap size={22} />} color="cyan" />
+        <StatCard title="IM Connected" value={imConnectedCount} icon={<Smartphone size={22} />} color="info" />
       </div>
 
       <Card>
         <Tabs
           tabs={[
-            { id: 'all', label: 'All', count: BINDINGS.length },
-            { id: 'private', label: '1:1 Private', count: oneToOne.length },
-            { id: 'shared', label: 'N:1 Shared', count: shared.length },
-            { id: 'multi', label: '1:N Multi-Agent', count: multi.length },
+            { id: 'employees', label: 'All Employees', count: EMPLOYEES.length },
             { id: 'routing', label: 'Routing Rules', count: routingRules.length },
             { id: 'mappings', label: 'IM User Mappings', count: userMappings.length },
           ]}
@@ -166,7 +162,7 @@ export default function Bindings() {
         <div className="mt-4">
           {activeTab === 'routing' ? (
             <div>
-              <p className="text-sm text-text-secondary mb-4">Rules are evaluated in priority order. First match wins. The Tenant Router uses these rules to determine which agent handles each incoming message.</p>
+              <p className="text-sm text-text-secondary mb-4">Position → Runtime routing rules. The Tenant Router uses these to determine which AgentCore Runtime handles each employee's messages.</p>
               <Table
                 columns={[
                   { key: 'priority', label: '#', render: (r: typeof routingRules[0]) => <span className="font-mono text-sm">{r.priority}</span> },
@@ -178,9 +174,7 @@ export default function Bindings() {
                     </div>
                   )},
                   { key: 'action', label: 'Action', render: (r: typeof routingRules[0]) => (
-                    <Badge color={r.action === 'route_to_shared_agent' ? 'primary' : 'success'}>
-                      {r.action === 'route_to_shared_agent' ? `→ ${r.agentId || 'shared'}` : '→ personal agent'}
-                    </Badge>
+                    <Badge color="primary">→ {r.agentId || r.action}</Badge>
                   )},
                   { key: 'desc', label: 'Description', render: (r: typeof routingRules[0]) => <span className="text-xs text-text-muted">{r.description}</span> },
                 ]}
@@ -200,7 +194,7 @@ export default function Bindings() {
                 <div className="text-center py-8 text-text-muted">
                   <Smartphone size={32} className="mx-auto mb-2 opacity-50" />
                   <p className="text-sm">No IM user mappings configured yet.</p>
-                  <p className="text-xs mt-1">Add mappings so the system knows which employee is behind each IM account.</p>
+                  <p className="text-xs mt-1">Employees self-pair via Portal → Connect IM, or add manually here.</p>
                 </div>
               ) : (
                 <RevokeTable
@@ -212,38 +206,19 @@ export default function Bindings() {
               )}
             </div>
           ) : (
-            <Table columns={columns} data={tabData[activeTab] || []} />
+            <div>
+              <div className="rounded-xl bg-surface-secondary border border-dark-border/30 px-4 py-3 mb-4">
+                <p className="text-xs text-text-muted">
+                  Every employee with a position automatically gets a <strong>Serverless</strong> agent (AgentCore microVM, scales to zero).
+                  Admin can upgrade any employee to <strong>Always-on</strong> (ECS Fargate) from Agent Factory for scheduled tasks, direct IM bots, and instant response.
+                  When upgraded, the Serverless agent is replaced — employee always sees one agent.
+                </p>
+              </div>
+              <Table columns={employeeColumns} data={EMPLOYEES} />
+            </div>
           )}
         </div>
       </Card>
-
-      <Modal
-        open={showCreate} onClose={() => setShowCreate(false)} title="Create Binding"
-        footer={<div className="flex justify-end gap-3"><Button variant="default" onClick={() => setShowCreate(false)}>Cancel</Button><Button variant="primary" onClick={() => {
-          if (selEmp && selAgent && selChannel) {
-            const emp = EMPLOYEES.find(e => e.id === selEmp);
-            const agent = AGENTS.find(a => a.id === selAgent);
-            createBinding.mutate({
-              employeeId: selEmp, employeeName: emp?.name || '',
-              agentId: selAgent, agentName: agent?.name || '',
-              mode: selMode as '1:1' | 'N:1' | '1:N', channel: selChannel as any,
-              status: 'bound', createdAt: new Date().toISOString(),
-            });
-          }
-          setShowCreate(false); setSelEmp(''); setSelAgent(''); setSelChannel('');
-        }}>Create</Button></div>}
-      >
-        <div className="space-y-4">
-          <Select label="Employee" value={selEmp} onChange={setSelEmp} options={empOptions} placeholder="Select employee" />
-          <Select label="Agent" value={selAgent} onChange={setSelAgent} options={agentOptions} placeholder="Select agent" />
-          <Select label="Channel" value={selChannel} onChange={setSelChannel} options={channelOptions} placeholder="Select messaging channel" />
-          <Select label="Binding Mode" value={selMode} onChange={setSelMode} options={[
-            { label: '1:1 Private — One employee, one dedicated agent', value: '1:1' },
-            { label: 'N:1 Shared — Multiple employees share one agent', value: 'N:1' },
-            { label: '1:N Multi-Agent — One employee uses multiple agents', value: '1:N' },
-          ]} />
-        </div>
-      </Modal>
 
       {/* Bulk Provision by Position Modal */}
       <Modal
@@ -303,7 +278,8 @@ export default function Bindings() {
         ) : (
           <div className="space-y-4">
             <p className="text-sm text-text-secondary">
-              Auto-create a 1:1 agent and binding for every employee in the selected position who doesn't already have one.
+              Auto-create a Serverless agent for every employee in the selected position who doesn't already have one.
+              The agent inherits the position's SOUL template automatically.
             </p>
             <Select
               label="Position"

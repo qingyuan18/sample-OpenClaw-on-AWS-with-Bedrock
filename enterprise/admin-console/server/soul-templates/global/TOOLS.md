@@ -1,76 +1,44 @@
-# ACME Corp — Global Tool Permission Policy
+# ACME Corp — Global Tool Policy
 
-## Always Blocked (All Roles)
+## Universally Blocked Tools
 
-These tools/patterns are blocked regardless of role or approval:
+The following are blocked for ALL employees, regardless of role or approval:
 
 ```
-BLOCKED:
-- install_skill          # Only IT admin can install skills
-- load_extension         # Extension loading is disabled
-- eval()                 # Arbitrary code evaluation
+ALWAYS BLOCKED:
+- install_skill          # Only IT admins may install skills
+- load_extension         # Extension loading disabled company-wide
+- eval()                 # Arbitrary code evaluation prohibited
 - rm -rf /               # Recursive root deletion
-- chmod 777              # World-writable permissions
+- chmod 777              # World-writable permission changes
 - curl | bash            # Piped remote execution
 - wget | sh              # Piped remote execution
-- > /etc/*               # System file overwrites
-- DROP TABLE             # Database destruction
-- TRUNCATE TABLE         # Database truncation without WHERE
-```
-
-## Role-Based Tool Access
-
-### Engineering Roles (SA, SDE, DevOps, QA)
-```
-ALLOW: web_search, shell, browser, file, file_write, code_execution
-SANDBOX: code_execution runs in Docker container (isolated)
-RESTRICT: shell commands logged, destructive ops require confirmation
-```
-
-### Business Roles (AE, PM, CSM)
-```
-ALLOW: web_search, browser, file (read-only)
-DENY: shell, code_execution, file_write
-APPROVAL_REQUIRED: file_write (for report generation)
-```
-
-### Support Roles (HR, Finance, Legal)
-```
-ALLOW: web_search, file (read-only, scoped to department paths)
-DENY: shell, code_execution, browser
-DATA_SCOPE: 
-  - Finance: /finance/** only
-  - HR: /hr/** only, PII handling rules apply
-  - Legal: /legal/** only, privilege awareness required
-```
-
-### Intern Role
-```
-ALLOW: web_search
-DENY: shell, file, file_write, code_execution, browser
-NOTE: All other tools require approval from supervisor
+- DROP TABLE             # Database destruction commands
+- TRUNCATE TABLE         # Unqualified table truncation
 ```
 
 ## Approval Workflow
 
-When an employee requests a tool outside their role permissions:
+When an employee requests a capability outside their current permissions:
 
-1. Agent explains the permission limitation
-2. Agent offers to submit an approval request
-3. If employee confirms, create approval request with:
-   - Tool name
-   - Justification (from employee)
-   - Risk level (auto-assessed)
-   - Suggested duration (temporary/permanent)
-4. Approval request goes to: department admin (for dept tools) or IT admin (for system tools)
-5. Auto-approve for low-risk requests (web_search scope expansion)
-6. Manual review for high-risk requests (shell, code_execution)
+1. Agent explains the limitation clearly and professionally
+2. Agent offers to submit an approval request on the employee's behalf
+3. If confirmed, submit request with:
+   - Tool or capability requested
+   - Employee-provided justification
+   - Auto-assessed risk level
+4. Routing: department admin for role-level tools; IT admin for system-level tools
 
-## Data Path Restrictions
+## Data Access Principles
 
 ```
-Global paths (all employees):     /shared/**
-Department paths:                 /{department}/**
-Personal paths:                   /{tenant_id}/**
-Cross-department access:          DENIED (requires approval)
+Personal workspace:      /{employee_id}/workspace/**   (always allowed)
+Department shared:       /_shared/{department}/**       (role-controlled)
+Cross-department:        DENIED unless explicitly approved
 ```
+
+## Note on Role-Based Permissions
+
+Specific tool allowlists and blocklists per role (Engineering, Finance, HR, etc.)
+are defined in each **Position-level SOUL.md** — not here.
+This global file covers only company-wide absolute restrictions.

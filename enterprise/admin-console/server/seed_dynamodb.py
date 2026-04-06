@@ -56,28 +56,34 @@ def seed(table_name: str, region: str):
 
     # --- Employees ---
     employees = [
-        ("emp-z3", "张三", "EMP-001", "pos-sa", "Solutions Architect", "dept-eng", "Engineering", ["telegram","slack"], "agent-sa-z3", "active"),
-        ("emp-l4", "李四", "EMP-002", "pos-sa", "Solutions Architect", "dept-eng", "Engineering", ["whatsapp"], "agent-sa-l4", "active"),
-        ("emp-chen", "陈伟", "EMP-003", "pos-sa", "Solutions Architect", "dept-eng", "Engineering", ["feishu"], "agent-sa-chen", "active"),
-        ("emp-w5", "王五", "EMP-004", "pos-sde", "Software Engineer", "dept-eng-backend", "Backend Team", ["slack"], "agent-sde-w5", "active"),
-        ("emp-liu", "刘洋", "EMP-005", "pos-sde", "Software Engineer", "dept-eng-backend", "Backend Team", ["slack"], "agent-sde-liu", "active"),
-        ("emp-yang", "杨帆", "EMP-006", "pos-sde", "Software Engineer", "dept-eng-frontend", "Frontend Team", ["slack","discord"], "agent-sde-yang", "active"),
-        ("emp-zhao", "赵磊", "EMP-007", "pos-sde", "Software Engineer", "dept-eng-frontend", "Frontend Team", ["slack"], None, "idle"),
-        ("emp-sun", "孙浩", "EMP-008", "pos-devops", "DevOps Engineer", "dept-eng-platform", "Platform Team", ["slack","telegram"], "agent-devops-sun", "active"),
-        ("emp-wu", "吴昊", "EMP-009", "pos-devops", "DevOps Engineer", "dept-eng-platform", "Platform Team", ["slack"], "agent-devops-wu", "active"),
-        ("emp-huang", "黄丽", "EMP-010", "pos-qa", "QA Engineer", "dept-eng-qa", "QA Team", ["slack"], "agent-qa-huang", "active"),
-        ("emp-mike", "Mike Johnson", "EMP-011", "pos-ae", "Account Executive", "dept-sales-ent", "Enterprise Sales", ["whatsapp","slack"], "agent-ae-mike", "active"),
-        ("emp-sarah", "Sarah Kim", "EMP-012", "pos-ae", "Account Executive", "dept-sales-ent", "Enterprise Sales", ["whatsapp"], "agent-ae-sarah", "active"),
-        ("emp-tom", "Tom Wilson", "EMP-013", "pos-ae", "Account Executive", "dept-sales-smb", "SMB Sales", ["slack"], None, "idle"),
-        ("emp-lin", "林小雨", "EMP-014", "pos-pm", "Product Manager", "dept-product", "Product", ["feishu","slack"], "agent-pm-lin", "active"),
-        ("emp-alex", "Alex Rivera", "EMP-015", "pos-pm", "Product Manager", "dept-product", "Product", ["slack"], "agent-pm-alex", "idle"),
-        ("emp-carol", "Carol Zhang", "EMP-016", "pos-fa", "Finance Analyst", "dept-finance", "Finance", ["slack"], "agent-fa-carol", "active"),
-        ("emp-david", "David Park", "EMP-017", "pos-fa", "Finance Analyst", "dept-finance", "Finance", ["slack"], "agent-fa-david", "active"),
-        ("emp-jenny", "Jenny Liu", "EMP-018", "pos-hr", "HR Specialist", "dept-hr", "HR & Admin", ["feishu","dingtalk"], "agent-hr-jenny", "active"),
-        ("emp-emma", "Emma Chen", "EMP-019", "pos-csm", "Customer Success Manager", "dept-cs", "Customer Success", ["slack","whatsapp"], "agent-csm-emma", "active"),
-        ("emp-rachel", "Rachel Li", "EMP-021", "pos-legal", "Legal Counsel", "dept-legal", "Legal & Compliance", ["slack"], "agent-legal-rachel", "active"),
-        ("emp-jiade", "JiaDe Wang", "EMP-030", "pos-sa", "Solutions Architect", "dept-eng", "Engineering", ["discord","slack"], "agent-sa-jiade", "active"),
-        ("emp-peter", "Peter Wu", "EMP-031", "pos-exec", "Executive", "dept-eng", "Engineering", ["discord"], "agent-exec-peter", "active"),
+        # Engineering — Solutions Architects
+        ("emp-jiade",  "JiaDe Wang",    "EMP-001", "pos-sa",    "Solutions Architect",         "dept-eng",          "Engineering",       ["discord","slack"],   "agent-sa-jiade",   "active"),
+        ("emp-marcus", "Marcus Bell",   "EMP-002", "pos-sa",    "Solutions Architect",         "dept-eng",          "Engineering",       ["slack","telegram"],  "agent-sa-marcus",  "active"),
+        ("emp-daniel", "Daniel Kim",    "EMP-003", "pos-sa",    "Solutions Architect",         "dept-eng",          "Engineering",       ["slack"],             "agent-sa-daniel",  "active"),
+        # Engineering — Software Engineers
+        ("emp-ryan",   "Ryan Park",     "EMP-004", "pos-sde",   "Software Engineer",           "dept-eng-backend",  "Backend Team",      ["slack","discord"],   "agent-sde-ryan",   "active"),
+        ("emp-sophie", "Sophie Turner", "EMP-005", "pos-sde",   "Software Engineer",           "dept-eng-backend",  "Backend Team",      ["slack"],             "agent-sde-sophie", "active"),
+        ("emp-nathan", "Nathan Brooks", "EMP-006", "pos-sde",   "Software Engineer",           "dept-eng-frontend", "Frontend Team",     ["slack"],             None,               "idle"),
+        # Engineering — DevOps & QA
+        ("emp-chris",  "Chris Morgan",  "EMP-007", "pos-devops","DevOps Engineer",             "dept-eng-platform", "Platform Team",     ["slack","telegram"],  "agent-devops-chris","active"),
+        ("emp-lisa",   "Lisa Chen",     "EMP-008", "pos-devops","DevOps Engineer",             "dept-eng-platform", "Platform Team",     ["slack"],             "agent-devops-lisa", "active"),
+        ("emp-tony",   "Tony Reed",     "EMP-009", "pos-qa",    "QA Engineer",                 "dept-eng-qa",       "QA Team",           ["slack"],             "agent-qa-tony",    "active"),
+        # Sales
+        ("emp-mike",   "Mike Johnson",  "EMP-011", "pos-ae",    "Account Executive",           "dept-sales-ent",    "Enterprise Sales",  ["whatsapp","slack"],  "agent-ae-mike",    "active"),
+        ("emp-sarah",  "Sarah Kim",     "EMP-012", "pos-ae",    "Account Executive",           "dept-sales-ent",    "Enterprise Sales",  ["whatsapp"],          "agent-ae-sarah",   "active"),
+        ("emp-tom",    "Tom Wilson",    "EMP-013", "pos-ae",    "Account Executive",           "dept-sales-smb",    "SMB Sales",         ["slack"],             None,               "idle"),
+        # Product
+        ("emp-alex",   "Alex Rivera",   "EMP-015", "pos-pm",    "Product Manager",             "dept-product",      "Product",           ["slack"],             "agent-pm-alex",    "active"),
+        ("emp-priya",  "Priya Patel",   "EMP-014", "pos-pm",    "Product Manager",             "dept-product",      "Product",           ["slack","discord"],   "agent-pm-priya",   "active"),
+        # Finance
+        ("emp-carol",  "Carol Zhang",   "EMP-016", "pos-fa",    "Finance Analyst",             "dept-finance",      "Finance",           ["slack","telegram"],  "agent-fa-carol",   "active"),
+        ("emp-david",  "David Park",    "EMP-017", "pos-fa",    "Finance Analyst",             "dept-finance",      "Finance",           ["slack"],             "agent-fa-david",   "active"),
+        # HR, CS, Legal
+        ("emp-jenny",  "Jenny Liu",     "EMP-018", "pos-hr",    "HR Specialist",               "dept-hr",           "HR & Admin",        ["slack"],             "agent-hr-jenny",   "active"),
+        ("emp-emma",   "Emma Chen",     "EMP-019", "pos-csm",   "Customer Success Manager",    "dept-cs",           "Customer Success",  ["slack","whatsapp"],  "agent-csm-emma",   "active"),
+        ("emp-rachel", "Rachel Li",     "EMP-021", "pos-legal", "Legal Counsel",               "dept-legal",        "Legal & Compliance",["slack"],             "agent-legal-rachel","active"),
+        # Executive
+        ("emp-peter",  "Peter Wu",      "EMP-031", "pos-exec",  "Executive",                   "dept-eng",          "Engineering",       ["discord"],           "agent-exec-peter", "active"),
     ]
     for eid, name, eno, pid, pname, did, dname, chs, aid, ast in employees:
         item = {"PK": ORG, "SK": f"EMP#{eid}", "GSI1PK": "TYPE#emp", "GSI1SK": f"EMP#{eid}",
@@ -89,28 +95,36 @@ def seed(table_name: str, region: str):
 
     # --- Agents ---
     agents = [
-        ("agent-sa-z3", "SA Agent - 张三", "emp-z3", "张三", "pos-sa", "Solutions Architect", "active", 4.6, ["jina-reader","deep-research","arch-diagram-gen","cost-calculator"], ["telegram","slack"]),
-        ("agent-sa-l4", "SA Agent - 李四", "emp-l4", "李四", "pos-sa", "Solutions Architect", "active", 4.3, ["jina-reader","deep-research","arch-diagram-gen"], ["whatsapp"]),
-        ("agent-sa-chen", "SA Agent - 陈伟", "emp-chen", "陈伟", "pos-sa", "Solutions Architect", "active", 4.4, ["jina-reader","deep-research","arch-diagram-gen","cost-calculator"], ["feishu"]),
-        ("agent-sde-w5", "SDE Agent - 王五", "emp-w5", "王五", "pos-sde", "Software Engineer", "active", 4.1, ["jina-reader","deep-research","github-pr","code-review"], ["slack"]),
-        ("agent-sde-liu", "SDE Agent - 刘洋", "emp-liu", "刘洋", "pos-sde", "Software Engineer", "active", 4.2, ["jina-reader","deep-research","github-pr"], ["slack"]),
-        ("agent-sde-yang", "SDE Agent - 杨帆", "emp-yang", "杨帆", "pos-sde", "Software Engineer", "active", 4.5, ["jina-reader","deep-research","github-pr","code-review"], ["slack","discord"]),
-        ("agent-devops-sun", "DevOps Agent - 孙浩", "emp-sun", "孙浩", "pos-devops", "DevOps Engineer", "active", 4.7, ["jina-reader","deep-research","github-pr"], ["slack","telegram"]),
-        ("agent-devops-wu", "DevOps Agent - 吴昊", "emp-wu", "吴昊", "pos-devops", "DevOps Engineer", "active", 4.0, ["jina-reader","deep-research","github-pr"], ["slack"]),
-        ("agent-qa-huang", "QA Agent - 黄丽", "emp-huang", "黄丽", "pos-qa", "QA Engineer", "active", 4.3, ["jina-reader","deep-research","jira-query"], ["slack"]),
-        ("agent-ae-mike", "Sales Agent - Mike", "emp-mike", "Mike Johnson", "pos-ae", "Account Executive", "active", 3.9, ["jina-reader","web-search","crm-query"], ["whatsapp","slack"]),
-        ("agent-ae-sarah", "Sales Agent - Sarah", "emp-sarah", "Sarah Kim", "pos-ae", "Account Executive", "active", 4.4, ["jina-reader","web-search","crm-query"], ["whatsapp"]),
-        ("agent-pm-lin", "PM Agent - 林小雨", "emp-lin", "林小雨", "pos-pm", "Product Manager", "active", 4.5, ["jina-reader","deep-research","jira-query","transcript"], ["feishu","slack"]),
-        ("agent-pm-alex", "PM Agent - Alex", "emp-alex", "Alex Rivera", "pos-pm", "Product Manager", "idle", 3.8, ["jina-reader","deep-research","jira-query"], ["slack"]),
-        ("agent-fa-carol", "Finance Agent - Carol", "emp-carol", "Carol Zhang", "pos-fa", "Finance Analyst", "active", 4.5, ["jina-reader","sap-connector","excel-gen"], ["slack"]),
-        ("agent-fa-david", "Finance Agent - David", "emp-david", "David Park", "pos-fa", "Finance Analyst", "active", 4.2, ["jina-reader","sap-connector"], ["slack"]),
-        ("agent-hr-jenny", "HR Agent - Jenny", "emp-jenny", "Jenny Liu", "pos-hr", "HR Specialist", "active", 4.1, ["jina-reader","web-search"], ["feishu","dingtalk"]),
-        ("agent-csm-emma", "CSM Agent - Emma", "emp-emma", "Emma Chen", "pos-csm", "Customer Success Manager", "active", 4.6, ["jina-reader","web-search","crm-query","slack-bridge"], ["slack","whatsapp"]),
-        ("agent-legal-rachel", "Legal Agent - Rachel", "emp-rachel", "Rachel Li", "pos-legal", "Legal Counsel", "active", 4.8, ["jina-reader","deep-research"], ["slack"]),
-        ("agent-sa-jiade", "SA Agent - JiaDe", "emp-jiade", "JiaDe Wang", "pos-sa", "Solutions Architect", "active", None, ["jina-reader","deep-research","arch-diagram-gen","cost-calculator"], ["discord","slack"]),
-        ("agent-exec-peter", "Executive Agent - Peter", "emp-peter", "Peter Wu", "pos-exec", "Executive", "active", None, ["jina-reader","deep-research","web_search"], ["discord"]),
-        ("agent-helpdesk", "IT Help Desk Agent", None, "(Shared)", "pos-devops", "DevOps Engineer", "active", 4.0, ["jina-reader","web-search","jira-query"], ["discord","slack"]),
-        ("agent-onboarding", "Onboarding Assistant", None, "(Shared)", "pos-hr", "HR Specialist", "active", 4.3, ["jina-reader","web-search"], ["feishu","slack"]),
+        # SA agents
+        ("agent-sa-jiade",  "SA Agent - JiaDe",   "emp-jiade",  "JiaDe Wang",    "pos-sa",    "Solutions Architect",         "active", None, ["jina-reader","deep-research","arch-diagram-gen","cost-calculator"], ["discord","slack"]),
+        ("agent-sa-marcus", "SA Agent - Marcus",  "emp-marcus", "Marcus Bell",   "pos-sa",    "Solutions Architect",         "active", 4.6, ["jina-reader","deep-research","arch-diagram-gen","cost-calculator"], ["slack","telegram"]),
+        ("agent-sa-daniel", "SA Agent - Daniel",  "emp-daniel", "Daniel Kim",    "pos-sa",    "Solutions Architect",         "active", 4.4, ["jina-reader","deep-research","arch-diagram-gen"], ["slack"]),
+        # SDE agents
+        ("agent-sde-ryan",   "SDE Agent - Ryan",   "emp-ryan",   "Ryan Park",     "pos-sde",   "Software Engineer",           "active", 4.5, ["jina-reader","deep-research","github-pr","code-review"], ["slack","discord"]),
+        ("agent-sde-sophie", "SDE Agent - Sophie", "emp-sophie", "Sophie Turner", "pos-sde",   "Software Engineer",           "active", 4.2, ["jina-reader","deep-research","github-pr"], ["slack"]),
+        # DevOps agents
+        ("agent-devops-chris","DevOps Agent - Chris","emp-chris","Chris Morgan",  "pos-devops","DevOps Engineer",             "active", 4.7, ["jina-reader","deep-research","github-pr"], ["slack","telegram"]),
+        ("agent-devops-lisa", "DevOps Agent - Lisa","emp-lisa",  "Lisa Chen",     "pos-devops","DevOps Engineer",             "active", 4.1, ["jina-reader","deep-research","github-pr"], ["slack"]),
+        # QA
+        ("agent-qa-tony",    "QA Agent - Tony",    "emp-tony",   "Tony Reed",     "pos-qa",    "QA Engineer",                 "active", 4.3, ["jina-reader","deep-research","jira-query"], ["slack"]),
+        # Sales
+        ("agent-ae-mike",    "Sales Agent - Mike", "emp-mike",   "Mike Johnson",  "pos-ae",    "Account Executive",           "active", 3.9, ["jina-reader","web-search","crm-query"], ["whatsapp","slack"]),
+        ("agent-ae-sarah",   "Sales Agent - Sarah","emp-sarah",  "Sarah Kim",     "pos-ae",    "Account Executive",           "active", 4.4, ["jina-reader","web-search","crm-query"], ["whatsapp"]),
+        # Product
+        ("agent-pm-alex",    "PM Agent - Alex",    "emp-alex",   "Alex Rivera",   "pos-pm",    "Product Manager",             "active", 4.2, ["jina-reader","deep-research","jira-query"], ["slack"]),
+        ("agent-pm-priya",   "PM Agent - Priya",   "emp-priya",  "Priya Patel",   "pos-pm",    "Product Manager",             "active", 4.5, ["jina-reader","deep-research","jira-query","transcript"], ["slack","discord"]),
+        # Finance
+        ("agent-fa-carol",   "Finance Agent - Carol","emp-carol","Carol Zhang",   "pos-fa",    "Finance Analyst",             "active", 4.5, ["jina-reader","sap-connector","excel-gen"], ["slack","telegram"]),
+        ("agent-fa-david",   "Finance Agent - David","emp-david","David Park",    "pos-fa",    "Finance Analyst",             "active", 4.2, ["jina-reader","sap-connector"], ["slack"]),
+        # HR, CS, Legal
+        ("agent-hr-jenny",   "HR Agent - Jenny",   "emp-jenny",  "Jenny Liu",     "pos-hr",    "HR Specialist",               "active", 4.1, ["jina-reader","web-search"], ["slack"]),
+        ("agent-csm-emma",   "CSM Agent - Emma",   "emp-emma",   "Emma Chen",     "pos-csm",   "Customer Success Manager",    "active", 4.6, ["jina-reader","web-search","crm-query","slack-bridge"], ["slack","whatsapp"]),
+        ("agent-legal-rachel","Legal Agent - Rachel","emp-rachel","Rachel Li",    "pos-legal", "Legal Counsel",               "active", 4.8, ["jina-reader","deep-research"], ["slack"]),
+        # Executive
+        ("agent-exec-peter", "Executive Agent - Peter","emp-peter","Peter Wu",   "pos-exec",  "Executive",                   "active", None, ["jina-reader","deep-research","web_search"], ["discord"]),
+        # Shared agents
+        ("agent-helpdesk",   "IT Help Desk Agent", None,          "(Shared)",     "pos-devops","DevOps Engineer",             "active", 4.0, ["jina-reader","web-search","jira-query"], ["discord","slack"]),
+        ("agent-onboarding", "Onboarding Assistant",None,         "(Shared)",     "pos-hr",    "HR Specialist",               "active", 4.3, ["jina-reader","web-search"], ["slack"]),
     ]
     for aid, name, eid, ename, pid, pname, status, qs, skills, chs in agents:
         item = {"PK": ORG, "SK": f"AGENT#{aid}", "GSI1PK": "TYPE#agent", "GSI1SK": f"AGENT#{aid}",
@@ -124,18 +138,18 @@ def seed(table_name: str, region: str):
 
     # --- Bindings ---
     bindings = [
-        ("bind-01", "emp-z3", "张三", "agent-sa-z3", "SA Agent - 张三", "1:1", "telegram", "bound"),
-        ("bind-02", "emp-z3", "张三", "agent-sa-z3", "SA Agent - 张三", "1:1", "slack", "pending"),
-        ("bind-03", "emp-l4", "李四", "agent-sa-l4", "SA Agent - 李四", "1:1", "whatsapp", "pending"),
-        ("bind-05", "emp-w5", "王五", "agent-sde-w5", "SDE Agent - 王五", "1:1", "slack", "bound"),
-        ("bind-08", "emp-sun", "孙浩", "agent-devops-sun", "DevOps Agent - 孙浩", "1:1", "slack", "expired"),
-        ("bind-11", "emp-mike", "Mike Johnson", "agent-ae-mike", "Sales Agent - Mike", "1:1", "whatsapp", "bound"),
-        ("bind-15", "emp-carol", "Carol Zhang", "agent-fa-carol", "Finance Agent - Carol", "1:1", "slack", "bound"),
-        ("bind-20", "emp-z3", "张三", "agent-helpdesk", "IT Help Desk Agent", "N:1", "discord", "bound"),
-        ("bind-21", "emp-w5", "王五", "agent-helpdesk", "IT Help Desk Agent", "N:1", "discord", "bound"),
-        ("bind-27", "emp-z3", "张三", "agent-sde-w5", "SDE Agent - 王五", "1:N", "slack", "bound"),
-        ("bind-jiade-sa", "emp-jiade", "JiaDe Wang", "agent-sa-jiade", "SA Agent - JiaDe", "1:1", "discord", "bound"),
-        ("bind-peter-exec", "emp-peter", "Peter Wu", "agent-exec-peter", "Executive Agent - Peter", "1:1", "discord", "bound"),
+        ("bind-jiade-dc",  "emp-jiade",  "JiaDe Wang",   "agent-sa-jiade",    "SA Agent - JiaDe",    "1:1", "discord",  "bound"),
+        ("bind-jiade-sl",  "emp-jiade",  "JiaDe Wang",   "agent-sa-jiade",    "SA Agent - JiaDe",    "1:1", "slack",    "bound"),
+        ("bind-marcus-sl", "emp-marcus", "Marcus Bell",  "agent-sa-marcus",   "SA Agent - Marcus",   "1:1", "slack",    "bound"),
+        ("bind-marcus-tg", "emp-marcus", "Marcus Bell",  "agent-sa-marcus",   "SA Agent - Marcus",   "1:1", "telegram", "pending"),
+        ("bind-ryan-dc",   "emp-ryan",   "Ryan Park",    "agent-sde-ryan",    "SDE Agent - Ryan",    "1:1", "discord",  "bound"),
+        ("bind-chris-sl",  "emp-chris",  "Chris Morgan", "agent-devops-chris","DevOps Agent - Chris","1:1", "slack",    "bound"),
+        ("bind-mike-wa",   "emp-mike",   "Mike Johnson", "agent-ae-mike",     "Sales Agent - Mike",  "1:1", "whatsapp", "bound"),
+        ("bind-carol-sl",  "emp-carol",  "Carol Zhang",  "agent-fa-carol",    "Finance Agent - Carol","1:1","slack",    "bound"),
+        ("bind-carol-tg",  "emp-carol",  "Carol Zhang",  "agent-fa-carol",    "Finance Agent - Carol","1:1","telegram", "bound"),
+        ("bind-peter-dc",  "emp-peter",  "Peter Wu",     "agent-exec-peter",  "Executive Agent - Peter","1:1","discord","bound"),
+        ("bind-helpdesk-1","emp-jiade",  "JiaDe Wang",   "agent-helpdesk",    "IT Help Desk Agent",  "N:1", "discord",  "bound"),
+        ("bind-helpdesk-2","emp-ryan",   "Ryan Park",    "agent-helpdesk",    "IT Help Desk Agent",  "N:1", "discord",  "bound"),
     ]
     for bid, eid, ename, aid, aname, mode, ch, st in bindings:
         items.append({"PK": ORG, "SK": f"BIND#{bid}", "GSI1PK": f"AGENT#{aid}", "GSI1SK": f"BIND#{bid}",

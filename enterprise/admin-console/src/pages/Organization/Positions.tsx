@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Briefcase, Users, Bot, Building2, Plus, Zap } from 'lucide-react';
+import { Briefcase, Users, Bot, Building2, Plus, Zap, Pencil, Trash2, AlertTriangle } from 'lucide-react';
 import { Card, StatCard, Badge, Button, PageHeader, Table, Modal, Input, Select, Textarea } from '../../components/ui';
-import { usePositions, useDepartments, useAgents, useEmployees, useCreatePosition, useBulkProvision } from '../../hooks/useApi';
+import { usePositions, useDepartments, useAgents, useEmployees, useCreatePosition, useUpdatePosition, useDeletePosition, useBulkProvision } from '../../hooks/useApi';
 import { CHANNEL_LABELS } from '../../types';
 import type { Position, ChannelType } from '../../types';
 
@@ -11,8 +11,13 @@ export default function Positions() {
   const { data: AGENTS = [] } = useAgents();
   const { data: EMPLOYEES = [] } = useEmployees();
   const createPosition = useCreatePosition();
+  const updatePosition = useUpdatePosition();
+  const deletePosition = useDeletePosition();
   const bulkProvision = useBulkProvision();
   const [showCreate, setShowCreate] = useState(false);
+  const [editingPos, setEditingPos] = useState<Position | null>(null);
+  const [deletingPos, setDeletingPos] = useState<Position | null>(null);
+  const [deleteError, setDeleteError] = useState('');
   const [selected, setSelected] = useState<Position | null>(null);
   const [provisionResult, setProvisionResult] = useState<any>(null);
   const [newName, setNewName] = useState('');
@@ -86,6 +91,12 @@ export default function Positions() {
               </div>
             );
           }},
+          { key: 'actions', label: '', render: (p: Position) => (
+            <div className="flex items-center gap-1">
+              <button onClick={e => { e.stopPropagation(); setEditingPos(p); }} className="p-1.5 rounded hover:bg-dark-hover text-text-muted hover:text-text-primary"><Pencil size={13} /></button>
+              <button onClick={e => { e.stopPropagation(); setDeletingPos(p); setDeleteError(''); }} className="p-1.5 rounded hover:bg-dark-hover text-text-muted hover:text-danger"><Trash2 size={13} /></button>
+            </div>
+          )},
         ]}
         data={POSITIONS}
       />
@@ -108,7 +119,7 @@ export default function Positions() {
                 <div className="rounded-lg bg-warning/5 border border-warning/20 p-3 flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-warning">{stats.unbound} employee(s) without agents</p>
-                    <p className="text-xs text-text-muted">Auto-create 1:1 agents with position SOUL template and default skills</p>
+                    <p className="text-xs text-text-muted">Auto-create Serverless agents with position SOUL template and default skills</p>
                   </div>
                   <Button variant="primary" size="sm" onClick={() => handleProvision(selected.id, selected.defaultChannel)} disabled={bulkProvision.isPending}>
                     <Zap size={14} /> {bulkProvision.isPending ? 'Provisioning...' : `Provision All (${stats.unbound})`}
@@ -168,6 +179,54 @@ export default function Positions() {
             </div>
           );
         })()}
+      </Modal>
+
+      {/* Edit Position Modal */}
+      <Modal open={!!editingPos} title={editingPos ? `Edit: ${editingPos.name}` : ''} onClose={() => setEditingPos(null)} footer={
+        <><Button variant="ghost" onClick={() => setEditingPos(null)}>Cancel</Button>
+        <Button variant="primary" disabled={updatePosition.isPending} onClick={() => {
+          if (!editingPos) return;
+          const dept = DEPARTMENTS.find(d => d.id === editingPos.departmentId);
+          updatePosition.mutate({ id: editingPos.id, name: editingPos.name, departmentId: editingPos.departmentId,
+            departmentName: dept?.name || editingPos.departmentName, defaultChannel: editingPos.defaultChannel,
+            defaultSkills: editingPos.defaultSkills, toolAllowlist: editingPos.toolAllowlist, soulTemplate: editingPos.soulTemplate },
+            { onSuccess: () => setEditingPos(null) });
+        }}>{updatePosition.isPending ? 'Saving…' : 'Save'}</Button></>
+      }>
+        {editingPos && <div className="space-y-4">
+          <Input label="Name" value={editingPos.name} onChange={v => setEditingPos({ ...editingPos, name: v })} />
+          <Select label="Department" value={editingPos.departmentId} onChange={v => {
+            const dept = DEPARTMENTS.find(d => d.id === v);
+            setEditingPos({ ...editingPos, departmentId: v, departmentName: dept?.name || '' });
+          }} options={DEPARTMENTS.filter(d => !d.parentId).map(d => ({ label: d.name, value: d.id }))} />
+          <Select label="Default Channel" value={editingPos.defaultChannel || 'slack'} onChange={v => setEditingPos({ ...editingPos, defaultChannel: v as any })}
+            options={[{label:'Slack',value:'slack'},{label:'Telegram',value:'telegram'},{label:'Discord',value:'discord'},{label:'WhatsApp',value:'whatsapp'}]} />
+        </div>}
+      </Modal>
+
+      {/* Delete Position Modal */}
+      <Modal open={!!deletingPos} title="Delete Position" onClose={() => setDeletingPos(null)} footer={
+        <><Button variant="ghost" onClick={() => setDeletingPos(null)}>Cancel</Button>
+        <Button variant="danger" disabled={deletePosition.isPending || !!deleteError} onClick={() => {
+          if (!deletingPos) return;
+          setDeleteError('');
+          deletePosition.mutate(deletingPos.id, {
+            onSuccess: () => setDeletingPos(null),
+            onError: (err: any) => setDeleteError(err?.response?.data?.message || err?.message || 'Delete failed'),
+          });
+        }}>{deletePosition.isPending ? 'Deleting…' : 'Delete'}</Button></>
+      }>
+        <div className="space-y-3">
+          <p className="text-sm text-text-primary">Delete position <strong>{deletingPos?.name}</strong>?</p>
+          {deleteError ? (
+            <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5">
+              <AlertTriangle size={16} className="text-danger mt-0.5 shrink-0" />
+              <p className="text-sm text-danger">{deleteError}</p>
+            </div>
+          ) : (
+            <p className="text-xs text-text-muted">All employees must be reassigned to another position first.</p>
+          )}
+        </div>
       </Modal>
 
       {/* Create Modal */}

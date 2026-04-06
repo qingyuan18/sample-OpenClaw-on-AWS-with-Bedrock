@@ -24,7 +24,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
 # Install OpenClaw and ClawHub CLI globally via npm
-RUN npm install -g openclaw@latest clawhub@latest
+# Pin the openclaw npm package to 2026.3.24.
+# 2026.3.28 (released 2026-03-29T02:02Z) changed how the Gateway delivers responses —
+# reply no longer written to subprocess stdout — breaking IM channel integration
+# (Feishu, DingTalk, Telegram, Discord). Do NOT upgrade without testing IM channels end-to-end.
+RUN npm install -g openclaw@2026.3.24 clawhub@latest
 
 # Install enterprise built-in skills (Layer 1)
 # These are available to all tenants with zero cold-start overhead.

@@ -49,6 +49,55 @@ function log(msg) {
 // States: 'cold' -> 'warming' -> 'warm' -> (TTL expires) -> 'cold'
 const tenantState = new Map();
 
+// Pending IM pairing confirmations (two-step: /start TOKEN → YES/NO)
+// key: `${channel}:${userId}` → { token, empName, expiresAt }
+// Stored in-memory only; a proxy restart loses pending pairings (user re-scans QR to retry)
+const pendingPairings = new Map();
+
+// Binding cache: avoids a DynamoDB lookup on every IM message.
+// key: `${channel}:${userId}` → { bound: bool, empId: str, expiresAt: number }
+// TTL: 60 seconds. Binding changes take effect within 1 minute.
+const _bindingCache = new Map();
+const _BINDING_CACHE_TTL = 60_000;
+
+// IM channels that require a valid employee binding before the bot will respond.
+// Portal/web sessions use JWT auth and don't go through this check.
+const _IM_CHANNELS_REQUIRING_BINDING = new Set([
+  'telegram', 'discord', 'feishu', 'dingtalk', 'slack', 'teams',
+  'googlechat', 'whatsapp', 'wechat', 'line', 'viber',
+]);
+
+async function checkImBinding(channel, userId) {
+  const key = `${channel}:${userId}`;
+  const cached = _bindingCache.get(key);
+  if (cached && Date.now() < cached.expiresAt) return cached;
+
+  try {
+    const http = require('node:http');
+    const result = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1', port: 8099,
+        path: `/api/v1/internal/im-binding-check?channel=${encodeURIComponent(channel)}&channelUserId=${encodeURIComponent(userId)}`,
+        method: 'GET',
+      }, (res) => {
+        let data = '';
+        res.on('data', c => data += c);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch { resolve({ bound: false }); }
+        });
+      });
+      req.on('error', () => resolve({ bound: false }));
+      req.setTimeout(3000, () => { req.destroy(); resolve({ bound: true }); }); // fail open on timeout
+      req.end();
+    });
+    const entry = { ...result, expiresAt: Date.now() + _BINDING_CACHE_TTL };
+    _bindingCache.set(key, entry);
+    return entry;
+  } catch {
+    return { bound: true }; // fail open — better to respond than to silently drop
+  }
+}
+
 function getTenantKey(channel, userId) {
   return `${channel}__${userId}`;
 }
@@ -596,59 +645,129 @@ server.on('stream', (stream, headers) => {
       }
 
       // =====================================================================
-      // PATH C: IM Self-Service Pairing — intercept /start TOKEN commands
-      // When an employee scans the Portal QR code, Telegram sends "/start TOKEN".
-      // We validate the token against Admin Console and write the SSM mapping
-      // WITHOUT invoking AgentCore — fast, free, no microVM spin-up.
+      // PATH C: IM Self-Service Pairing — two-step confirmation flow
       //
-      // Safety: only intercepts exact pattern /start [A-Z0-9]{10,16}
-      // On any error (invalid token, network, etc.) → falls through to normal routing
+      // Step 1: /start TOKEN → pair-pending (validate) → inject "reply YES to confirm"
+      //         Pending state stored in memory (pendingPairings Map, 10 min TTL)
+      // Step 2: YES → pair-complete → inject success
+      //         NO  → cancel → inject cancel
+      //
+      // Safety: errors fall through to normal routing (employee gets agent response)
       // =====================================================================
-      // Search anywhere in userText — the /start TOKEN appears after OpenClaw's metadata blocks
+
+      // Helper: call Admin Console API (internal only, no auth needed)
+      const callAdminAPI = (path, payload) => new Promise((resolve, reject) => {
+        const http = require('node:http');
+        const body = JSON.stringify(payload);
+        const req = http.request({
+          hostname: '127.0.0.1', port: 8099, path,
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        }, (res) => {
+          let data = '';
+          res.on('data', c => data += c);
+          res.on('end', () => {
+            try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+            catch { resolve({ status: res.statusCode, body: {} }); }
+          });
+        });
+        req.on('error', reject);
+        req.setTimeout(5000, () => { req.destroy(); reject(new Error('timeout')); });
+        req.write(body);
+        req.end();
+      });
+
+      // Helper: inject a fake Bedrock response without calling AgentCore
+      const injectResponse = (text) => {
+        if (isStream) {
+          stream.respond({ ':status': 200, 'content-type': 'application/vnd.amazon.eventstream' });
+          for (const e of buildEventStream(text)) stream.write(e);
+          stream.end();
+        } else {
+          stream.respond({ ':status': 200, 'content-type': 'application/json' });
+          stream.end(JSON.stringify(buildConverseResponse(text)));
+        }
+      };
+
+      const pendingKey = `${channel}:${userId}`;
+      const msgTrim = userText.trim();
+
+      // ── Step 2a: BIND confirmation (not YES/NO to avoid intercepting normal conversation) ──
+      if (/^(bind|BIND|Bind|绑定确认)$/.test(msgTrim) && pendingPairings.has(pendingKey)) {
+        const pending = pendingPairings.get(pendingKey);
+        if (Date.now() > pending.expiresAt) {
+          pendingPairings.delete(pendingKey);
+          injectResponse('Binding timed out. Please go back to the Employee Portal and generate a new QR code.');
+          return;
+        }
+        try {
+          const result = await callAdminAPI('/api/v1/bindings/pair-complete', {
+            token: pending.token, channel, channelUserId: userId,
+          });
+          pendingPairings.delete(pendingKey);
+          if (result.status === 200 && result.body.success) {
+            log(`PATH C: Pairing confirmed ${channel} ${userId} → ${result.body.employeeId}`);
+            injectResponse(`Connected! You can now chat with your AI Agent here.`);
+          } else {
+            injectResponse(`Binding failed: ${result.body.detail || 'please try again'}.`);
+          }
+        } catch (e) {
+          log(`PATH C: pair-complete error: ${e.message}`);
+          injectResponse('Binding error. Please try again later.');
+        }
+        return;
+      }
+
+      // ── Step 2b: CANCEL ────────────────────────────────────────────────
+      if (/^(cancel|CANCEL|Cancel|取消绑定)$/.test(msgTrim) && pendingPairings.has(pendingKey)) {
+        pendingPairings.delete(pendingKey);
+        injectResponse('Binding cancelled. To reconnect, go to the Employee Portal and generate a new QR code.');
+        return;
+      }
+
+      // ── Step 1: /start TOKEN ───────────────────────────────────────────
       const pairMatch = userText.match(/\/start\s+([A-Za-z0-9]{10,16})/);
       if (pairMatch && userId !== 'unknown' && channel !== 'unknown') {
         const token = pairMatch[1].toUpperCase();
         try {
-          const http = require('node:http');
-          const pairResult = await new Promise((resolve, reject) => {
-            const payload = JSON.stringify({ channel, channelUserId: userId, token });
-            const req = http.request({
-              hostname: '127.0.0.1', port: 8099, path: '/api/v1/bindings/pair-complete',
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
-            }, (res) => {
-              let data = '';
-              res.on('data', c => data += c);
-              res.on('end', () => {
-                try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-                catch { resolve({ status: res.statusCode, body: {} }); }
-              });
-            });
-            req.on('error', reject);
-            req.setTimeout(5000, () => { req.destroy(); reject(new Error('pair-complete timeout')); });
-            req.write(payload);
-            req.end();
+          const pending = await callAdminAPI('/api/v1/bindings/pair-pending', {
+            token, channel, channelUserId: userId,
           });
-
-          if (pairResult.status === 200 && pairResult.body.success) {
-            const { employeeName, positionName } = pairResult.body;
-            const confirmMsg = `✅ Connected! Hi ${employeeName} — your ${positionName || 'AI'} Agent is ready. Just send me a message to get started!`;
-            log(`PATH C: Pairing complete ${channel} ${userId} → ${pairResult.body.employeeId}`);
-            if (isStream) {
-              stream.respond({ ':status': 200, 'content-type': 'application/vnd.amazon.eventstream' });
-              for (const e of buildEventStream(confirmMsg)) stream.write(e);
-              stream.end();
-            } else {
-              stream.respond({ ':status': 200, 'content-type': 'application/json' });
-              stream.end(JSON.stringify(buildConverseResponse(confirmMsg)));
-            }
-            return; // ← pairing handled, do NOT route to AgentCore
+          if (pending.status === 200 && pending.body.valid) {
+            const { employeeName, positionName, isRebind } = pending.body;
+            pendingPairings.set(pendingKey, {
+              token,
+              empName: employeeName,
+              expiresAt: Date.now() + 10 * 60 * 1000,
+            });
+            const action = isRebind ? 're-linking' : 'linking';
+            const msg = `You are ${action} this account to [${employeeName}${positionName ? ' · ' + positionName : ''}].\n\nReply BIND to confirm, or CANCEL to abort (valid for 10 minutes).`;
+            log(`PATH C: Pending pairing ${channel} ${userId} → ${employeeName}`);
+            injectResponse(msg);
+            return;
           }
-          // Token invalid/expired — fall through to normal routing with a hint
-          log(`PATH C: Pairing token invalid/expired for ${userId}, routing normally`);
+          if (pending.status === 200 && pending.body.reason === 'already_bound_other') {
+            injectResponse(`This account is already linked to ${pending.body.boundTo}. Please contact your IT admin to unlink it first.`);
+            return;
+          }
+          // Token invalid/expired — fall through to normal routing
+          log(`PATH C: pair-pending invalid (${pending.body?.reason}), routing normally`);
         } catch (pairErr) {
           log(`PATH C: Pairing error (falling through): ${pairErr.message}`);
-          // Fall through to normal routing — employee gets regular agent response
         }
+      }
+
+      // ── Strict binding enforcement ─────────────────────────────────────
+      // Only respond to IM accounts that have been explicitly bound to an
+      // employee via the Portal. Portal/web sessions (userId starts with
+      // "emp-") are always allowed — they use JWT auth, not IM binding.
+      if (_IM_CHANNELS_REQUIRING_BINDING.has(channel) && !userId.startsWith('emp-')) {
+        const binding = await checkImBinding(channel, userId);
+        if (!binding.bound) {
+          log(`Binding check: ${channel}:${userId} not bound — rejecting`);
+          injectResponse('This account is not linked to an employee. Please bind your account via the Employee Portal first.');
+          return;
+        }
+        log(`Binding check: ${channel}:${userId} → ${binding.employeeId}`);
       }
 
       // Core routing: fast-path for cold tenants, full pipeline for warm

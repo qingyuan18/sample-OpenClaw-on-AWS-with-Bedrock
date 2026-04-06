@@ -36,7 +36,10 @@ RUN if [ "$TARGETARCH" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then \
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g openclaw@latest clawhub@latest
+# Pin the openclaw npm package to 2026.3.24 — same as agent-container/Dockerfile.
+# 2026.3.28 changed Gateway response delivery, breaking IM channel integration.
+# Do NOT upgrade without testing IM channels (Feishu, DingTalk, Telegram, Discord) end-to-end.
+RUN npm install -g openclaw@2026.3.24 clawhub@latest
 
 # Executive tier: all skills pre-installed (no S3 hot-load needed)
 # Full tool set: shell, browser, file, code_execution, all integrations

@@ -149,11 +149,37 @@ def get_agent(agent_id: str) -> Optional[dict]:
 def get_bindings() -> list[dict]:
     return _query("BIND#")
 
+def get_bindings_for_employee(emp_id: str) -> list[dict]:
+    """Get all BIND# records for an employee (agent-employee bindings)."""
+    all_bindings = get_bindings()
+    return [b for b in all_bindings if b.get("employeeId") == emp_id]
+
+def _delete_item(sk: str) -> bool:
+    """Delete an item by SK."""
+    try:
+        _get_table().delete_item(Key={"PK": ORG_PK, "SK": sk})
+        return True
+    except ClientError as e:
+        print(f"[db] DynamoDB delete error: {e}")
+        return False
+
 def create_department(data: dict) -> dict:
     did = data.get("id", f"dept-{int(__import__('time').time())}")
     data["id"] = did
     _put_item(f"DEPT#{did}", data, "TYPE#dept", f"DEPT#{did}")
     return data
+
+def update_department(dept_id: str, updates: dict) -> dict | None:
+    item = _get_item(f"DEPT#{dept_id}")
+    if not item:
+        return None
+    item.update(updates)
+    item["id"] = dept_id
+    _put_item(f"DEPT#{dept_id}", item, "TYPE#dept", f"DEPT#{dept_id}")
+    return item
+
+def delete_department(dept_id: str) -> bool:
+    return _delete_item(f"DEPT#{dept_id}")
 
 def create_position(data: dict) -> dict:
     pid = data.get("id", f"pos-{int(__import__('time').time())}")
@@ -161,11 +187,38 @@ def create_position(data: dict) -> dict:
     _put_item(f"POS#{pid}", data, "TYPE#pos", f"POS#{pid}")
     return data
 
+def update_position(pos_id: str, updates: dict) -> dict | None:
+    item = _get_item(f"POS#{pos_id}")
+    if not item:
+        return None
+    item.update(updates)
+    item["id"] = pos_id
+    _put_item(f"POS#{pos_id}", item, "TYPE#pos", f"POS#{pos_id}")
+    return item
+
+def delete_position(pos_id: str) -> bool:
+    return _delete_item(f"POS#{pos_id}")
+
 def create_employee(data: dict) -> dict:
     eid = data.get("id", f"emp-{int(__import__('time').time())}")
     data["id"] = eid
     _put_item(f"EMP#{eid}", data, "TYPE#emp", f"EMP#{eid}")
     return data
+
+def update_employee(emp_id: str, updates: dict) -> dict | None:
+    item = _get_item(f"EMP#{emp_id}")
+    if not item:
+        return None
+    item.update(updates)
+    item["id"] = emp_id
+    _put_item(f"EMP#{emp_id}", item, "TYPE#emp", f"EMP#{emp_id}")
+    return item
+
+def delete_employee(emp_id: str) -> bool:
+    return _delete_item(f"EMP#{emp_id}")
+
+def delete_binding(bind_id: str) -> bool:
+    return _delete_item(f"BIND#{bind_id}")
 
 def create_agent(data: dict) -> dict:
     aid = data.get("id", f"agent-{int(__import__('time').time())}")
@@ -423,3 +476,124 @@ def increment_twin_stat(token: str, field: str) -> None:
         )
     except Exception:
         pass
+
+
+# === User Mappings — IM channel user → employee (replaces SSM user-mapping/) ===
+
+def get_user_mappings() -> list[dict]:
+    """List all IM channel → employee mappings from DynamoDB."""
+    return _query("MAPPING#")
+
+
+def get_user_mapping(channel: str, channel_user_id: str) -> Optional[dict]:
+    """Get a single mapping by channel + userId."""
+    return _get_item(f"MAPPING#{channel}__{channel_user_id}")
+
+
+def resolve_user_mapping(channel_user_id: str) -> str:
+    """Resolve a bare channelUserId to employeeId by scanning all mappings.
+
+    Used when we only have the raw userId (e.g. Feishu OU ID) without
+    knowing the channel prefix. Scans MAPPING# items and matches on
+    channelUserId attribute. Dataset is small (<50 items), so scan is fine.
+    """
+    for m in get_user_mappings():
+        if m.get("channelUserId") == channel_user_id:
+            return m.get("employeeId", "")
+    return ""
+
+
+def create_user_mapping(channel: str, channel_user_id: str, employee_id: str) -> dict:
+    """Write IM channel user → employee mapping to DynamoDB."""
+    from datetime import datetime, timezone
+    item = {
+        "channel": channel,
+        "channelUserId": channel_user_id,
+        "employeeId": employee_id,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+    _put_item(
+        f"MAPPING#{channel}__{channel_user_id}",
+        item,
+        "TYPE#mapping",
+        f"MAPPING#{channel}__{channel_user_id}",
+    )
+    return item
+
+
+def delete_user_mapping(channel: str, channel_user_id: str) -> None:
+    """Delete an IM channel user → employee mapping from DynamoDB."""
+    try:
+        _get_table().delete_item(
+            Key={"PK": ORG_PK, "SK": f"MAPPING#{channel}__{channel_user_id}"}
+        )
+    except ClientError as e:
+        print(f"[db] delete_user_mapping error: {e}")
+
+
+def get_user_mappings_for_employee(emp_id: str) -> list[dict]:
+    """Get all IM connections for a specific employee (reverse lookup)."""
+    return [m for m in get_user_mappings() if m.get("employeeId") == emp_id]
+
+
+# === Routing Config — position/employee → AgentCore Runtime (replaces SSM routing params) ===
+
+def get_routing_config() -> dict:
+    """Read position→runtime and employee_override→runtime mappings.
+
+    Returns: {
+        "position_runtime": {"pos-exec": "runtime_id", ...},
+        "employee_override": {"emp-ada": "runtime_id", ...}
+    }
+    """
+    item = _get_item("CONFIG#routing")
+    if not item:
+        return {"position_runtime": {}, "employee_override": {}}
+    return {
+        "position_runtime": item.get("position_runtime", {}),
+        "employee_override": item.get("employee_override", {}),
+    }
+
+
+def set_routing_config(position_runtime: dict, employee_override: dict) -> None:
+    """Write full routing config to DynamoDB as a single item."""
+    _put_item(
+        "CONFIG#routing",
+        {
+            "position_runtime": position_runtime,
+            "employee_override": employee_override,
+            "updatedAt": __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            ).isoformat(),
+        },
+        "TYPE#config",
+        "CONFIG#routing",
+    )
+
+
+def set_position_runtime(pos_id: str, runtime_id: str) -> None:
+    """Set runtime for a single position (partial update)."""
+    cfg = get_routing_config()
+    cfg["position_runtime"][pos_id] = runtime_id
+    set_routing_config(cfg["position_runtime"], cfg["employee_override"])
+
+
+def set_employee_runtime_override(emp_id: str, runtime_id: str) -> None:
+    """Set per-employee runtime override (partial update)."""
+    cfg = get_routing_config()
+    cfg["employee_override"][emp_id] = runtime_id
+    set_routing_config(cfg["position_runtime"], cfg["employee_override"])
+
+
+def remove_position_runtime(pos_id: str) -> None:
+    """Remove runtime mapping for a position."""
+    cfg = get_routing_config()
+    cfg["position_runtime"].pop(pos_id, None)
+    set_routing_config(cfg["position_runtime"], cfg["employee_override"])
+
+
+def remove_employee_runtime_override(emp_id: str) -> None:
+    """Remove per-employee runtime override."""
+    cfg = get_routing_config()
+    cfg["employee_override"].pop(emp_id, None)
+    set_routing_config(cfg["position_runtime"], cfg["employee_override"])

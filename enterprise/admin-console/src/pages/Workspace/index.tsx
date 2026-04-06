@@ -260,11 +260,11 @@ export default function Workspace() {
             ) : (
               <select value={selectedAgent} onChange={e => handleAgentChange(e.target.value)}
                 className="rounded-2xl border border-dark-border/60 bg-surface-dim px-4 py-2.5 text-sm text-text-primary focus:border-primary/60 focus:outline-none appearance-none min-w-[280px]">
-                <optgroup label="Personal Agents">
-                  {agents.filter(a => a.employeeId).map(a => <option key={a.id} value={a.id}>{a.name} ({a.positionName})</option>)}
+                <optgroup label="Serverless Agents">
+                  {agents.filter(a => a.deployMode !== 'always-on-ecs').map(a => <option key={a.id} value={a.id}>{a.name} ({a.positionName})</option>)}
                 </optgroup>
-                <optgroup label="Shared Agents">
-                  {agents.filter(a => !a.employeeId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                <optgroup label="Always-on Agents">
+                  {agents.filter(a => a.deployMode === 'always-on-ecs').map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </optgroup>
               </select>
             )}

@@ -1,5 +1,29 @@
-import { ReactNode } from 'react';
+import { ReactNode, Component, ErrorInfo } from 'react';
 import clsx from 'clsx';
+
+// === Error Boundary ===
+interface EBState { error: Error | null }
+export class ErrorBoundary extends Component<{ children: ReactNode; fallback?: ReactNode }, EBState> {
+  state: EBState = { error: null };
+  static getDerivedStateFromError(error: Error): EBState { return { error }; }
+  componentDidCatch(error: Error, info: ErrorInfo) { console.error('[ErrorBoundary]', error, info); }
+  render() {
+    if (this.state.error) {
+      return this.props.fallback ?? (
+        <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
+          <div className="text-danger text-2xl">⚠</div>
+          <p className="text-sm font-medium text-text-primary">Something went wrong on this page.</p>
+          <p className="text-xs text-text-muted font-mono max-w-lg break-all">{this.state.error.message}</p>
+          <button onClick={() => this.setState({ error: null })}
+            className="mt-2 rounded-lg bg-primary/10 px-4 py-2 text-xs text-primary hover:bg-primary/20 transition-colors">
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // === Card (M3 Surface Container with tonal elevation) ===
 export function Card({ children, className }: { children: ReactNode; className?: string }) {

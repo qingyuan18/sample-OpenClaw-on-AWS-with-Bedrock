@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { BookOpen, Search, FolderOpen, Globe, Building2, FileText, Plus, Eye, Link2, X } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import { BookOpen, Search, FolderOpen, Globe, Building2, FileText, Plus, Eye, Link2, X, Code } from 'lucide-react';
 import { Card, StatCard, Badge, Button, PageHeader, Table, Modal, Input, Select, Tabs, Textarea } from '../../components/ui';
 import { useKnowledgeBases, useUploadKnowledgeDoc, usePositions, useEmployees, useKBAssignments, useSetPositionKBs, useSetEmployeeKBs } from '../../hooks/useApi';
 import type { KnowledgeBaseItem } from '../../hooks/useApi';
@@ -20,6 +21,7 @@ export default function KnowledgeBase_() {
   const [showUpload, setShowUpload] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showFile, setShowFile] = useState<{ name: string; content: string } | null>(null);
+  const [fileViewRaw, setFileViewRaw] = useState(false);
   const [selectedKb, setSelectedKb] = useState<KnowledgeBaseItem | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -256,12 +258,39 @@ export default function KnowledgeBase_() {
         </Card>
       )}
 
-      {/* File Viewer */}
-      <Modal open={!!showFile} onClose={() => setShowFile(null)} title={showFile?.name || ''} size="lg">
+      {/* File Viewer — rendered Markdown with raw toggle */}
+      <Modal open={!!showFile} onClose={() => { setShowFile(null); setFileViewRaw(false); }}
+        title={showFile?.name || ''} size="xl">
         {showFile && (
-          <pre className="rounded-lg bg-dark-bg border border-dark-border p-4 text-sm text-text-secondary whitespace-pre-wrap font-mono max-h-[500px] overflow-y-auto">
-            {showFile.content}
-          </pre>
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs text-text-muted">{showFile.content.length.toLocaleString()} chars</span>
+              <button
+                onClick={() => setFileViewRaw(r => !r)}
+                className="flex items-center gap-1.5 text-xs text-text-muted hover:text-primary transition-colors border border-dark-border rounded px-2 py-1"
+              >
+                <Code size={12} />
+                {fileViewRaw ? 'Rendered' : 'Raw'}
+              </button>
+            </div>
+            {fileViewRaw ? (
+              <pre className="rounded-lg bg-dark-bg border border-dark-border p-4 text-sm text-text-secondary whitespace-pre-wrap font-mono max-h-[60vh] overflow-y-auto">
+                {showFile.content}
+              </pre>
+            ) : (
+              <div className="rounded-lg bg-dark-bg border border-dark-border p-5 max-h-[60vh] overflow-y-auto prose prose-invert prose-sm max-w-none
+                prose-headings:text-text-primary prose-headings:font-semibold
+                prose-p:text-text-secondary prose-p:leading-relaxed
+                prose-strong:text-text-primary
+                prose-code:bg-dark-card prose-code:px-1 prose-code:rounded prose-code:text-xs prose-code:text-primary
+                prose-pre:bg-dark-card prose-pre:border prose-pre:border-dark-border
+                prose-table:text-sm prose-th:text-text-primary prose-td:text-text-secondary
+                prose-a:text-primary prose-blockquote:border-primary/40 prose-blockquote:text-text-muted
+                prose-ul:text-text-secondary prose-ol:text-text-secondary prose-li:marker:text-text-muted">
+                <ReactMarkdown>{showFile.content}</ReactMarkdown>
+              </div>
+            )}
+          </div>
         )}
       </Modal>
 

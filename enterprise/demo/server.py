@@ -30,42 +30,48 @@ DIST_DIR = Path(__file__).parent / "dist"
 # ============================================================
 
 DEPARTMENTS = [
-    {"id":"dept-eng","name":"Engineering","parentId":"","headName":"Zhang San","headId":"emp-z3","employeeCount":8},
-    {"id":"dept-frontend","name":"Frontend","parentId":"dept-eng","headName":"Li Si","headId":"emp-lisi","employeeCount":2},
-    {"id":"dept-backend","name":"Backend","parentId":"dept-eng","headName":"Chen Wei","headId":"emp-chen","employeeCount":3},
-    {"id":"dept-devops","name":"DevOps","parentId":"dept-eng","headName":"Sun Hao","headId":"emp-sun","employeeCount":2},
-    {"id":"dept-qa","name":"QA","parentId":"dept-eng","headName":"Liu Yang","headId":"emp-liu","employeeCount":1},
-    {"id":"dept-sales","name":"Sales","parentId":"","headName":"Mike Johnson","headId":"emp-mike","employeeCount":4},
-    {"id":"dept-ae","name":"Account Executives","parentId":"dept-sales","headName":"Mike Johnson","headId":"emp-mike","employeeCount":2},
-    {"id":"dept-csm","name":"Customer Success","parentId":"dept-sales","headName":"Emma Chen","headId":"emp-emma","employeeCount":2},
-    {"id":"dept-product","name":"Product","parentId":"","headName":"Lin Xiaoyu","headId":"emp-lin","employeeCount":3},
-    {"id":"dept-finance","name":"Finance & Accounting","parentId":"","headName":"Carol Zhang","headId":"emp-carol","employeeCount":2},
-    {"id":"dept-hr","name":"HR & Admin","parentId":"","headName":"Jenny Wu","headId":"emp-jenny","employeeCount":2},
-    {"id":"dept-legal","name":"Legal & Compliance","parentId":"","headName":"Rachel Kim","headId":"emp-rachel","employeeCount":1},
-    {"id":"dept-exec","name":"Executive","parentId":"","headName":"CEO","headId":"emp-ceo","employeeCount":1},
+    {"id":"dept-eng",         "name":"Engineering",          "parentId":"",         "headName":"Peter Wu",     "headId":"emp-peter",  "employeeCount":9},
+    {"id":"dept-eng-backend", "name":"Backend Team",         "parentId":"dept-eng", "headName":"Ryan Park",    "headId":"emp-ryan",   "employeeCount":2},
+    {"id":"dept-eng-frontend","name":"Frontend Team",        "parentId":"dept-eng", "headName":"Sophie Turner","headId":"emp-sophie", "employeeCount":1},
+    {"id":"dept-eng-platform","name":"Platform Team",        "parentId":"dept-eng", "headName":"Chris Morgan", "headId":"emp-chris",  "employeeCount":2},
+    {"id":"dept-eng-qa",      "name":"QA Team",              "parentId":"dept-eng", "headName":"Tony Reed",    "headId":"emp-tony",   "employeeCount":1},
+    {"id":"dept-sales",       "name":"Sales",                "parentId":"",         "headName":"Mike Johnson", "headId":"emp-mike",   "employeeCount":3},
+    {"id":"dept-sales-ent",   "name":"Enterprise Sales",     "parentId":"dept-sales","headName":"Mike Johnson","headId":"emp-mike",   "employeeCount":2},
+    {"id":"dept-sales-smb",   "name":"SMB Sales",            "parentId":"dept-sales","headName":"Tom Wilson",  "headId":"emp-tom",    "employeeCount":1},
+    {"id":"dept-product",     "name":"Product",              "parentId":"",         "headName":"Alex Rivera",  "headId":"emp-alex",   "employeeCount":2},
+    {"id":"dept-finance",     "name":"Finance",              "parentId":"",         "headName":"Carol Zhang",  "headId":"emp-carol",  "employeeCount":2},
+    {"id":"dept-hr",          "name":"HR & Admin",           "parentId":"",         "headName":"Jenny Liu",    "headId":"emp-jenny",  "employeeCount":1},
+    {"id":"dept-cs",          "name":"Customer Success",     "parentId":"",         "headName":"Emma Chen",    "headId":"emp-emma",   "employeeCount":1},
+    {"id":"dept-legal",       "name":"Legal & Compliance",   "parentId":"",         "headName":"Rachel Li",    "headId":"emp-rachel", "employeeCount":1},
 ]
 
 _EMP_DATA = [
-    ("emp-z3","Zhang San","EMP-001","pos-sa","Solutions Architect","dept-eng","Engineering","admin",44),
-    ("emp-lisi","Li Si","EMP-002","pos-sa","Solutions Architect","dept-eng","Engineering","employee",35),
-    ("emp-w5","Wang Wu","EMP-003","pos-sde","Software Engineer","dept-eng","Engineering","employee",38),
-    ("emp-chen","Chen Wei","EMP-004","pos-sa","Solutions Architect","dept-eng","Engineering","employee",29),
-    ("emp-sun","Sun Hao","EMP-005","pos-devops","DevOps Engineer","dept-eng","Engineering","employee",72),
-    ("emp-liu","Liu Yang","EMP-006","pos-qa","QA Engineer","dept-eng","Engineering","employee",18),
-    ("emp-zhao","Zhao Ming","EMP-007","pos-sde","Software Engineer","dept-eng","Engineering","employee",25),
-    ("emp-zhou","Zhou Xiaoming","EMP-008","pos-sde","Software Engineer","dept-eng","Engineering","employee",21),
-    ("emp-ma","Ma Tianyu","EMP-009","pos-devops","DevOps Engineer","dept-eng","Engineering","employee",15),
-    ("emp-lin","Lin Xiaoyu","EMP-010","pos-pm","Product Manager","dept-product","Product","manager",31),
-    ("emp-alex","Alex Rivera","EMP-011","pos-pm","Product Manager","dept-product","Product","employee",8),
-    ("emp-wang2","Wang Fang","EMP-012","pos-pm","Product Manager","dept-product","Product","employee",12),
-    ("emp-mike","Mike Johnson","EMP-013","pos-ae","Account Executive","dept-sales","Sales","manager",27),
-    ("emp-tom","Tom Wilson","EMP-014","pos-ae","Account Executive","dept-sales","Sales","employee",19),
-    ("emp-carol","Carol Zhang","EMP-015","pos-fa","Finance Analyst","dept-finance","Finance & Accounting","employee",22),
-    ("emp-david","David Li","EMP-016","pos-fa","Finance Analyst","dept-finance","Finance & Accounting","employee",16),
-    ("emp-emma","Emma Chen","EMP-017","pos-csm","Customer Success Manager","dept-sales","Sales","employee",19),
-    ("emp-sarah","Sarah Lee","EMP-018","pos-csm","Customer Success Manager","dept-sales","Sales","employee",14),
-    ("emp-jenny","Jenny Wu","EMP-019","pos-hr","HR Specialist","dept-hr","HR & Admin","employee",15),
-    ("emp-rachel","Rachel Kim","EMP-020","pos-legal","Legal Counsel","dept-legal","Legal & Compliance","employee",11),
+    # Engineering
+    ("emp-jiade",  "JiaDe Wang",    "EMP-001", "pos-sa",    "Solutions Architect",         "dept-eng",          "Engineering",       "admin",   47),
+    ("emp-marcus", "Marcus Bell",   "EMP-002", "pos-sa",    "Solutions Architect",         "dept-eng",          "Engineering",       "employee",42),
+    ("emp-daniel", "Daniel Kim",    "EMP-003", "pos-sa",    "Solutions Architect",         "dept-eng",          "Engineering",       "employee",28),
+    ("emp-ryan",   "Ryan Park",     "EMP-004", "pos-sde",   "Software Engineer",           "dept-eng-backend",  "Backend Team",      "employee",62),
+    ("emp-sophie", "Sophie Turner", "EMP-005", "pos-sde",   "Software Engineer",           "dept-eng-backend",  "Backend Team",      "employee",38),
+    ("emp-nathan", "Nathan Brooks", "EMP-006", "pos-sde",   "Software Engineer",           "dept-eng-frontend", "Frontend Team",     "employee",15),
+    ("emp-chris",  "Chris Morgan",  "EMP-007", "pos-devops","DevOps Engineer",             "dept-eng-platform", "Platform Team",     "admin",   72),
+    ("emp-lisa",   "Lisa Chen",     "EMP-008", "pos-devops","DevOps Engineer",             "dept-eng-platform", "Platform Team",     "employee",19),
+    ("emp-tony",   "Tony Reed",     "EMP-009", "pos-qa",    "QA Engineer",                 "dept-eng-qa",       "QA Team",           "employee",24),
+    # Sales
+    ("emp-mike",   "Mike Johnson",  "EMP-011", "pos-ae",    "Account Executive",           "dept-sales-ent",    "Enterprise Sales",  "manager", 35),
+    ("emp-sarah",  "Sarah Kim",     "EMP-012", "pos-ae",    "Account Executive",           "dept-sales-ent",    "Enterprise Sales",  "employee",22),
+    ("emp-tom",    "Tom Wilson",    "EMP-013", "pos-ae",    "Account Executive",           "dept-sales-smb",    "SMB Sales",         "employee",12),
+    # Product
+    ("emp-alex",   "Alex Rivera",   "EMP-015", "pos-pm",    "Product Manager",             "dept-product",      "Product",           "manager", 44),
+    ("emp-priya",  "Priya Patel",   "EMP-014", "pos-pm",    "Product Manager",             "dept-product",      "Product",           "employee",12),
+    # Finance
+    ("emp-carol",  "Carol Zhang",   "EMP-016", "pos-fa",    "Finance Analyst",             "dept-finance",      "Finance",           "employee",33),
+    ("emp-david",  "David Park",    "EMP-017", "pos-fa",    "Finance Analyst",             "dept-finance",      "Finance",           "employee",18),
+    # HR, CS, Legal
+    ("emp-jenny",  "Jenny Liu",     "EMP-018", "pos-hr",    "HR Specialist",               "dept-hr",           "HR & Admin",        "manager", 29),
+    ("emp-emma",   "Emma Chen",     "EMP-019", "pos-csm",   "Customer Success Manager",    "dept-cs",           "Customer Success",  "employee",41),
+    ("emp-rachel", "Rachel Li",     "EMP-021", "pos-legal", "Legal Counsel",               "dept-legal",        "Legal & Compliance","employee",15),
+    # Executive
+    ("emp-peter",  "Peter Wu",      "EMP-031", "pos-exec",  "Executive",                   "dept-eng",          "Engineering",       "employee",28),
 ]
 
 EMPLOYEES = []
@@ -128,40 +134,40 @@ def _usage_by_agent():
     return [{"agentId":a["id"],"agentName":a["name"],"employeeName":a.get("employeeName",""),"positionName":a.get("positionName",""),"inputTokens":int(random.random()*50000),"outputTokens":int(random.random()*10000),"requests":int(random.random()*50),"cost":round(random.random()*5,2)} for a in AGENTS[:10]]
 
 SESSIONS = [
-    {"id":"sess-001","agentId":"agent-sa-z3","agentName":"SA Agent - Zhang San","employeeId":"emp-z3","employeeName":"Zhang San","channel":"telegram","turns":12,"tokensUsed":24500,"status":"active","lastActive":"2026-03-22T10:30:00Z","lastMessage":"Analyzing microservice architecture..."},
-    {"id":"sess-002","agentId":"agent-sde-w5","agentName":"SDE Agent - Wang Wu","employeeId":"emp-w5","employeeName":"Wang Wu","channel":"telegram","turns":8,"tokensUsed":16200,"status":"active","lastActive":"2026-03-22T10:25:00Z","lastMessage":"Running git diff on feature branch..."},
-    {"id":"sess-003","agentId":"agent-fa-carol","agentName":"Finance Agent - Carol Zhang","employeeId":"emp-carol","employeeName":"Carol Zhang","channel":"portal","turns":5,"tokensUsed":10100,"status":"active","lastActive":"2026-03-22T10:20:00Z","lastMessage":"Generating Q1 EBITDA report..."},
-    {"id":"sess-004","agentId":"agent-ae-mike","agentName":"AE Agent - Mike Johnson","employeeId":"emp-mike","employeeName":"Mike Johnson","channel":"slack","turns":3,"tokensUsed":6100,"status":"active","lastActive":"2026-03-22T10:15:00Z","lastMessage":"Querying CRM for pipeline data..."},
-    {"id":"sess-005","agentId":"agent-helpdesk","agentName":"IT Help Desk","employeeId":"emp-zhou","employeeName":"Zhou Xiaoming","channel":"slack","turns":2,"tokensUsed":4100,"status":"active","lastActive":"2026-03-22T10:10:00Z","lastMessage":"Resetting VPN credentials..."},
-    {"id":"sess-006","agentId":"agent-devops-sun","agentName":"DevOps Agent - Sun Hao","employeeId":"emp-sun","employeeName":"Sun Hao","channel":"slack","turns":15,"tokensUsed":30500,"status":"active","lastActive":"2026-03-22T09:45:00Z","lastMessage":"Checking CloudWatch alarms..."},
-    {"id":"sess-007","agentId":"agent-pm-lin","agentName":"PM Agent - Lin Xiaoyu","employeeId":"emp-lin","employeeName":"Lin Xiaoyu","channel":"slack","turns":6,"tokensUsed":12200,"status":"idle","lastActive":"2026-03-22T09:00:00Z","lastMessage":"Updating sprint backlog..."},
-    {"id":"sess-008","agentId":"agent-csm-emma","agentName":"CSM Agent - Emma Chen","employeeId":"emp-emma","employeeName":"Emma Chen","channel":"slack","turns":4,"tokensUsed":8100,"status":"idle","lastActive":"2026-03-22T08:30:00Z","lastMessage":"Preparing customer QBR deck..."},
+    {"id":"sess-001","agentId":"agent-sa-jiade",    "agentName":"SA Agent - JiaDe",    "employeeId":"emp-jiade", "employeeName":"JiaDe Wang",   "channel":"discord",  "turns":12,"tokensUsed":24500,"status":"active","lastActive":"2026-03-22T10:30:00Z","lastMessage":"Analyzing microservice architecture for TechCorp..."},
+    {"id":"sess-002","agentId":"agent-sde-ryan",     "agentName":"SDE Agent - Ryan",    "employeeId":"emp-ryan",  "employeeName":"Ryan Park",    "channel":"slack",    "turns":8, "tokensUsed":16200,"status":"active","lastActive":"2026-03-22T10:25:00Z","lastMessage":"Running git diff on feature/payment-api branch..."},
+    {"id":"sess-003","agentId":"agent-fa-carol",     "agentName":"Finance Agent - Carol","employeeId":"emp-carol","employeeName":"Carol Zhang",  "channel":"telegram", "turns":5, "tokensUsed":10100,"status":"active","lastActive":"2026-03-22T10:20:00Z","lastMessage":"Generating Q2 budget variance report..."},
+    {"id":"sess-004","agentId":"agent-ae-mike",      "agentName":"Sales Agent - Mike",  "employeeId":"emp-mike",  "employeeName":"Mike Johnson", "channel":"whatsapp", "turns":3, "tokensUsed":6100, "status":"active","lastActive":"2026-03-22T10:15:00Z","lastMessage":"Querying CRM for TechCorp pipeline data..."},
+    {"id":"sess-005","agentId":"agent-helpdesk",     "agentName":"IT Help Desk Agent",  "employeeId":"emp-nathan","employeeName":"Nathan Brooks", "channel":"slack",    "turns":2, "tokensUsed":4100, "status":"active","lastActive":"2026-03-22T10:10:00Z","lastMessage":"Resetting VPN credentials for new laptop..."},
+    {"id":"sess-006","agentId":"agent-devops-chris", "agentName":"DevOps Agent - Chris","employeeId":"emp-chris", "employeeName":"Chris Morgan", "channel":"telegram", "turns":15,"tokensUsed":30500,"status":"active","lastActive":"2026-03-22T09:45:00Z","lastMessage":"Checking CloudWatch alarms for prod ECS cluster..."},
+    {"id":"sess-007","agentId":"agent-pm-alex",      "agentName":"PM Agent - Alex",     "employeeId":"emp-alex",  "employeeName":"Alex Rivera",  "channel":"slack",    "turns":6, "tokensUsed":12200,"status":"idle", "lastActive":"2026-03-22T09:00:00Z","lastMessage":"Updating sprint 12 backlog in Jira..."},
+    {"id":"sess-008","agentId":"agent-csm-emma",     "agentName":"CSM Agent - Emma",    "employeeId":"emp-emma",  "employeeName":"Emma Chen",    "channel":"slack",    "turns":4, "tokensUsed":8100, "status":"idle", "lastActive":"2026-03-22T08:30:00Z","lastMessage":"Preparing TechCorp QBR deck for Friday..."},
 ]
 
 AUDIT_ENTRIES = [
-    {"id":"aud-001","timestamp":"2026-03-22T10:30:00Z","eventType":"agent_invocation","actorId":"emp-z3","actorName":"Zhang San","targetType":"agent","targetId":"agent-sa-z3","detail":"Portal chat: Analyze microservice architecture for Project Phoenix","status":"success"},
-    {"id":"aud-002","timestamp":"2026-03-22T10:25:00Z","eventType":"agent_invocation","actorId":"emp-w5","actorName":"Wang Wu","targetType":"agent","targetId":"agent-sde-w5","detail":"Telegram: Run git diff on feature/payment-api branch","status":"success"},
-    {"id":"aud-003","timestamp":"2026-03-22T10:20:00Z","eventType":"permission_denied","actorId":"emp-zhou","actorName":"Zhou Xiaoming","targetType":"tool","targetId":"shell","detail":"Intern attempted shell access — blocked by Plan A","status":"blocked"},
-    {"id":"aud-004","timestamp":"2026-03-22T10:15:00Z","eventType":"config_change","actorId":"system","actorName":"Auto-Provision","targetType":"binding","targetId":"agent-sde-zhou","detail":"Auto-provisioned SDE Agent for Zhou Xiaoming","status":"success"},
-    {"id":"aud-005","timestamp":"2026-03-22T09:45:00Z","eventType":"agent_invocation","actorId":"emp-carol","actorName":"Carol Zhang","targetType":"agent","targetId":"agent-fa-carol","detail":"Portal chat: Generate Q1 EBITDA report for Engineering","status":"success"},
+    {"id":"aud-001","timestamp":"2026-03-22T10:30:00Z","eventType":"agent_invocation","actorId":"emp-jiade","actorName":"JiaDe Wang","targetType":"agent","targetId":"agent-sa-jiade","detail":"Discord: Analyze microservice architecture for TechCorp migration","status":"success"},
+    {"id":"aud-002","timestamp":"2026-03-22T10:25:00Z","eventType":"agent_invocation","actorId":"emp-ryan","actorName":"Ryan Park","targetType":"agent","targetId":"agent-sde-ryan","detail":"Slack: Run git diff on feature/payment-api branch","status":"success"},
+    {"id":"aud-003","timestamp":"2026-03-22T10:20:00Z","eventType":"permission_denied","actorId":"emp-nathan","actorName":"Nathan Brooks","targetType":"tool","targetId":"shell","detail":"SDE attempted shell access on idle session — blocked by Plan A","status":"blocked"},
+    {"id":"aud-004","timestamp":"2026-03-22T10:15:00Z","eventType":"config_change","actorId":"system","actorName":"Auto-Provision","targetType":"binding","targetId":"agent-sde-sophie","detail":"Auto-provisioned SDE Agent for Sophie Turner","status":"success"},
+    {"id":"aud-005","timestamp":"2026-03-22T09:45:00Z","eventType":"agent_invocation","actorId":"emp-carol","actorName":"Carol Zhang","targetType":"agent","targetId":"agent-fa-carol","detail":"Telegram: Generate Q2 budget variance report for Engineering","status":"success"},
     {"id":"aud-006","timestamp":"2026-03-22T09:30:00Z","eventType":"permission_denied","actorId":"emp-carol","actorName":"Carol Zhang","targetType":"tool","targetId":"shell","detail":"Finance role attempted shell — blocked by Position SOUL","status":"blocked"},
-    {"id":"aud-007","timestamp":"2026-03-22T09:00:00Z","eventType":"config_change","actorId":"emp-z3","actorName":"Zhang San","targetType":"soul","targetId":"pos-sa","detail":"Updated SA Position SOUL template v1→v2","status":"success"},
-    {"id":"aud-008","timestamp":"2026-03-22T08:30:00Z","eventType":"approval","actorId":"emp-z3","actorName":"Zhang San","targetType":"approval","targetId":"apr-003","detail":"Approved shell access for Wang Wu (SDE)","status":"success"},
+    {"id":"aud-007","timestamp":"2026-03-22T09:00:00Z","eventType":"config_change","actorId":"emp-jiade","actorName":"JiaDe Wang","targetType":"soul","targetId":"pos-sa","detail":"Updated SA Position SOUL template v1→v2","status":"success"},
+    {"id":"aud-008","timestamp":"2026-03-22T08:30:00Z","eventType":"approval","actorId":"emp-jiade","actorName":"JiaDe Wang","targetType":"approval","targetId":"apr-003","detail":"Approved github-pr access for Ryan Park (SDE)","status":"success"},
 ]
 
 APPROVALS = [
-    {"id":"apr-001","tenant":"Zhou Xiaoming","tenantId":"emp-zhou","tool":"shell","reason":"Need to run diagnostic commands for onboarding task","risk":"medium","timestamp":"2026-03-22T08:00:00Z","status":"pending"},
-    {"id":"apr-002","tenant":"Ma Tianyu","tenantId":"emp-ma","tool":"code_execution","reason":"Testing Python script for infrastructure automation","risk":"low","timestamp":"2026-03-22T07:30:00Z","status":"pending"},
-    {"id":"apr-003","tenant":"Wang Wu","tenantId":"emp-w5","tool":"github-pr","reason":"Need to create PR for payment API feature","risk":"low","timestamp":"2026-03-21T14:00:00Z","status":"approved","reviewer":"Zhang San","resolvedAt":"2026-03-21T15:00:00Z"},
-    {"id":"apr-004","tenant":"Carol Zhang","tenantId":"emp-carol","tool":"shell","reason":"Want to check server logs for discrepancy","risk":"high","timestamp":"2026-03-20T10:00:00Z","status":"denied","reviewer":"Zhang San","resolvedAt":"2026-03-20T11:00:00Z"},
+    {"id":"apr-001","tenant":"Nathan Brooks","tenantId":"emp-nathan","tool":"shell","reason":"Need to run diagnostic commands for local dev environment","risk":"medium","timestamp":"2026-03-22T08:00:00Z","status":"pending"},
+    {"id":"apr-002","tenant":"Lisa Chen","tenantId":"emp-lisa","tool":"code_execution","reason":"Testing Python script for Terraform automation","risk":"low","timestamp":"2026-03-22T07:30:00Z","status":"pending"},
+    {"id":"apr-003","tenant":"Ryan Park","tenantId":"emp-ryan","tool":"github-pr","reason":"Need to create PR for payment API feature","risk":"low","timestamp":"2026-03-21T14:00:00Z","status":"approved","reviewer":"JiaDe Wang","resolvedAt":"2026-03-21T15:00:00Z"},
+    {"id":"apr-004","tenant":"Carol Zhang","tenantId":"emp-carol","tool":"shell","reason":"Want to check server logs for budget discrepancy","risk":"high","timestamp":"2026-03-20T10:00:00Z","status":"denied","reviewer":"JiaDe Wang","resolvedAt":"2026-03-20T11:00:00Z"},
 ]
 
 AUDIT_INSIGHTS = {"insights":[
-    {"id":"ins-001","severity":"high","category":"access_pattern","title":"Repeated shell access attempts from Intern role","description":"3 blocked shell access attempts from intern-role employees in 24h.","recommendation":"Consider sandboxed shell skill for Intern position.","affectedUsers":["Zhou Xiaoming","Ma Tianyu"],"detectedAt":"2026-03-22T10:35:00Z","source":"audit_log_scan"},
+    {"id":"ins-001","severity":"high","category":"access_pattern","title":"Repeated shell access attempts from SDE (idle session)","description":"2 blocked shell access attempts from SDE-role employees in 24h.","recommendation":"Consider sandboxed shell skill for offline SDE sessions.","affectedUsers":["Nathan Brooks","Lisa Chen"],"detectedAt":"2026-03-22T10:35:00Z","source":"audit_log_scan"},
     {"id":"ins-002","severity":"medium","category":"data_exposure","title":"Finance Agent sharing cost data via public Slack channel","description":"Q2 budget variance shared in #general instead of #finance-private.","recommendation":"Add channel restriction rule for financial data.","affectedUsers":["Carol Zhang"],"detectedAt":"2026-03-22T10:25:00Z","source":"memory_scan"},
-    {"id":"ins-003","severity":"high","category":"compliance","title":"SOUL template drift — 3 SA agents on old version","description":"Position SOUL updated 2 days ago but 3 agents not reassembled.","recommendation":"Trigger workspace reassembly for affected agents.","affectedUsers":["Zhang San","Li Si","Chen Wei"],"detectedAt":"2026-03-22T07:00:00Z","source":"version_drift_check"},
+    {"id":"ins-003","severity":"high","category":"compliance","title":"SOUL template drift — 2 SA agents on old version","description":"Position SOUL updated 2 days ago but 2 agents not reassembled.","recommendation":"Trigger workspace reassembly for affected agents.","affectedUsers":["Marcus Bell","Daniel Kim"],"detectedAt":"2026-03-22T07:00:00Z","source":"version_drift_check"},
     {"id":"ins-004","severity":"medium","category":"memory_risk","title":"PII detected in 2 employee memory files","description":"Phone numbers found in MEMORY.md files.","recommendation":"Enable automatic PII redaction for memory writes.","affectedUsers":["Mike Johnson","Emma Chen"],"detectedAt":"2026-03-22T08:30:00Z","source":"memory_scan"},
-    {"id":"ins-005","severity":"low","category":"behavior_anomaly","title":"Unusual after-hours usage from DevOps Agent","description":"72 messages this week, 40% between 11PM-3AM.","recommendation":"Review session logs, add after-hours alerts.","affectedUsers":["Sun Hao"],"detectedAt":"2026-03-22T09:00:00Z","source":"usage_pattern_analysis"},
+    {"id":"ins-005","severity":"low","category":"behavior_anomaly","title":"Unusual after-hours usage from DevOps Agent","description":"72 messages this week, 40% between 11PM-3AM.","recommendation":"Review session logs, add after-hours alerts.","affectedUsers":["Chris Morgan"],"detectedAt":"2026-03-22T09:00:00Z","source":"usage_pattern_analysis"},
 ],"summary":{"totalInsights":5,"high":2,"medium":2,"low":1,"lastScanAt":"2026-03-22T10:35:00Z","scanSources":["audit_log","memory_files","usage_patterns","version_drift"]}}
 
 MODEL_CONFIG = {"default":{"modelId":"global.amazon.nova-2-lite-v1:0","modelName":"Nova 2 Lite","inputRate":0.30,"outputRate":2.50},"fallback":{"modelId":"us.amazon.nova-pro-v1:0","modelName":"Nova Pro","inputRate":0.80,"outputRate":3.20},"positionOverrides":{"pos-sa":{"modelId":"global.anthropic.claude-sonnet-4-5-20250929-v1:0","modelName":"Claude Sonnet 4.5","inputRate":3.0,"outputRate":15.0,"reason":"SA needs advanced reasoning"}},"availableModels":[{"modelId":"global.amazon.nova-2-lite-v1:0","modelName":"Nova 2 Lite","inputRate":0.30,"outputRate":2.50,"enabled":True},{"modelId":"us.amazon.nova-pro-v1:0","modelName":"Nova Pro","inputRate":0.80,"outputRate":3.20,"enabled":True},{"modelId":"global.anthropic.claude-sonnet-4-5-20250929-v1:0","modelName":"Claude Sonnet 4.5","inputRate":3.0,"outputRate":15.0,"enabled":True},{"modelId":"moonshotai.kimi-k2.5","modelName":"Kimi K2.5","inputRate":0.60,"outputRate":3.0,"enabled":False}]}
@@ -183,7 +189,7 @@ KNOWLEDGE_BASES = [
 ]
 
 # ============================================================
-# Mock JWT — auto-login as Zhang San (admin)
+# Mock JWT — auto-login as JiaDe Wang (admin)
 # ============================================================
 import base64, hashlib, hmac
 
@@ -216,7 +222,7 @@ def handle_api(method, path, body=None):
         # Demo mode: accept any password
         return 200, {"token":_make_token(emp),"employee":{"id":emp["id"],"name":emp["name"],"role":emp["role"],"departmentId":emp["departmentId"],"departmentName":emp["departmentName"],"positionId":emp["positionId"],"positionName":emp["positionName"]}}
     if p == "auth/me":
-        return 200, {"id":"emp-z3","name":"Zhang San","role":"admin","departmentId":"dept-eng","departmentName":"Engineering","positionId":"pos-sa","positionName":"Solutions Architect"}
+        return 200, {"id":"emp-jiade","name":"JiaDe Wang","role":"admin","departmentId":"dept-eng","departmentName":"Engineering","positionId":"pos-sa","positionName":"Solutions Architect"}
 
     # Org
     if p == "org/departments": return 200, DEPARTMENTS
@@ -378,7 +384,7 @@ if __name__ == "__main__":
     print(f"   http://localhost:{PORT}")
     print(f"   Serving: {DIST_DIR}")
     print(f"   Mode: Mock API (no AWS needed)")
-    print(f"   Login: any employee ID (e.g. emp-z3, emp-carol)")
+    print(f"   Login: any employee ID (e.g. emp-jiade, emp-carol)")
     print(f"   Password: any value (demo mode)")
     print()
     try:

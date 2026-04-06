@@ -3,26 +3,11 @@ import { Puzzle, Lock, Check, Send, ChevronRight } from 'lucide-react';
 import { api } from '../../api/client';
 import { Card, Badge, Button } from '../../components/ui';
 
-const SKILL_LABELS: Record<string, { label: string; desc: string }> = {
-  'jina-reader': { label: 'Web Reader', desc: 'Let your agent read any webpage you link' },
-  'deep-research-pro': { label: 'Deep Research', desc: 'Multi-step research with source citations' },
-  'github-pr': { label: 'GitHub', desc: 'Review PRs, create issues, manage repos' },
-  's3-files': { label: 'S3 File Access', desc: 'Read and write files in your S3 workspace' },
-  'slack': { label: 'Slack', desc: 'Post messages and read channels in Slack' },
-  'notion': { label: 'Notion', desc: 'Read and write Notion pages and databases' },
-  'excel-gen': { label: 'Excel Generator', desc: 'Create and edit spreadsheets' },
-  'crm-query': { label: 'CRM Query', desc: 'Read customer data from Salesforce/HubSpot' },
-  'email-send': { label: 'Email', desc: 'Send emails on your behalf' },
-  'calendar-check': { label: 'Calendar', desc: 'Read and create calendar events' },
-  'aws-cli': { label: 'AWS CLI', desc: 'Run AWS CLI commands from your agent' },
-  'transcript': { label: 'Transcription', desc: 'Transcribe audio and video files' },
-};
-
 function friendlyName(raw: string) {
-  return SKILL_LABELS[raw]?.label || raw.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return raw.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
-function friendlyDesc(raw: string, fallback?: string) {
-  return SKILL_LABELS[raw]?.desc || fallback || 'Enterprise skill integration';
+function friendlyDesc(description?: string) {
+  return description || 'Enterprise skill integration';
 }
 
 export default function MySkills() {
@@ -42,7 +27,7 @@ export default function MySkills() {
         type: 'skill',
         resourceId: skillName,
         resourceName: friendlyName(skillName),
-        reason: `Employee requested access to skill: ${friendlyName(skillName)}`,
+        reason: `Employee requested access to skill: ${skillName}`,
       });
       setRequested(prev => new Set([...prev, skillName]));
       setToast(`Request submitted for "${friendlyName(skillName)}"`);
@@ -78,8 +63,8 @@ export default function MySkills() {
               <div key={s.id || s.name} className="flex items-start gap-3 rounded-xl bg-success/5 border border-success/20 px-3 py-2.5">
                 <Check size={15} className="text-success shrink-0 mt-0.5" />
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-text-primary">{friendlyName(s.name || s.id)}</p>
-                  <p className="text-xs text-text-muted">{friendlyDesc(s.name || s.id, s.description)}</p>
+                  <p className="text-sm font-medium text-text-primary">{s.name || friendlyName(s.id)}</p>
+                  <p className="text-xs text-text-muted">{friendlyDesc(s.description)}</p>
                 </div>
               </div>
             ))}
@@ -103,8 +88,8 @@ export default function MySkills() {
                 <div key={name} className="flex items-center gap-3 rounded-xl bg-surface-dim border border-dark-border/40 px-3 py-3">
                   <Lock size={15} className="text-text-muted shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-text-primary">{friendlyName(name)}</p>
-                    <p className="text-xs text-text-muted">{friendlyDesc(name, s.description)}</p>
+                    <p className="text-sm font-medium text-text-primary">{s.name || friendlyName(name)}</p>
+                    <p className="text-xs text-text-muted">{friendlyDesc(s.description)}</p>
                   </div>
                   {alreadyRequested ? (
                     <Badge color="info">Requested</Badge>
