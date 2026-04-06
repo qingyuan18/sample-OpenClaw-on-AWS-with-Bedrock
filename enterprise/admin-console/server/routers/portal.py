@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 import db
 import s3ops
-from shared import require_auth, require_role, ssm_client, GATEWAY_REGION, STACK_NAME, GATEWAY_ACCOUNT_ID
+from shared import require_auth, require_role, ssm_client, GATEWAY_REGION, STACK_NAME, GATEWAY_ACCOUNT_ID, GATEWAY_INSTANCE_ID
 from routers.bindings import _mapping_prefix, _write_user_mapping
 from routers.agents import get_skills
 
@@ -789,6 +789,22 @@ def portal_channels(authorization: str = Header(default="")):
 
     instructions = ch_instructions
 
+    # For always-on: resolve container IP + instance ID for SSM port-forward
+    agent_ip = None
+    instance_id = GATEWAY_INSTANCE_ID if GATEWAY_INSTANCE_ID else None
+    if is_always_on and always_on_agent_id:
+        try:
+            ep = ssm_ch.get_parameter(
+                Name=f"/openclaw/{stack}/always-on/{always_on_agent_id}/endpoint"
+            )["Parameter"]["Value"]
+            # ep is like http://10.0.1.253:8080 — extract IP
+            import re
+            m = re.search(r'(\d+\.\d+\.\d+\.\d+)', ep)
+            if m:
+                agent_ip = m.group(1)
+        except Exception:
+            pass
+
     return {
         "connected": connected,
         "deployMode": "always-on-ecs" if is_always_on else "serverless",
@@ -796,6 +812,8 @@ def portal_channels(authorization: str = Header(default="")):
         "pairingInstructions": instructions,
         "dedicatedBots": dedicated_bots,
         "alwaysOnAgentId": always_on_agent_id,
+        "agentIp": agent_ip,
+        "instanceId": instance_id,
     }
 
 
