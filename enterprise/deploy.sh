@@ -4,9 +4,10 @@
 #
 # Usage:
 #   cp .env.example .env        # first time: fill in your values
-#   bash deploy.sh              # deploy everything
-#   bash deploy.sh --skip-build # re-deploy without rebuilding Docker image
-#   bash deploy.sh --skip-seed  # re-deploy without re-seeding DynamoDB
+#   bash deploy.sh                  # deploy everything
+#   bash deploy.sh --skip-build     # re-deploy without rebuilding Docker image
+#   bash deploy.sh --skip-seed      # re-deploy without re-seeding DynamoDB
+#   bash deploy.sh --skip-services  # re-deploy without rebuilding services on EC2
 #
 # What this script does:
 #   1. Validates prerequisites (AWS CLI, Docker, Python, Node.js)
@@ -15,7 +16,8 @@
 #   4. Creates AgentCore Runtime
 #   5. Seeds DynamoDB with org data and positions
 #   6. Uploads SOUL templates and knowledge docs to S3
-#   7. Prints access instructions
+#   7. Stores secrets in SSM + configures EC2
+#   8. Deploys admin console + gateway services to EC2
 # =============================================================================
 set -euo pipefail
 
@@ -46,8 +48,9 @@ set +o allexport
 # ── Override from CLI flags ────────────────────────────────────────────────────
 for arg in "$@"; do
   case $arg in
-    --skip-build) SKIP_DOCKER_BUILD=true ;;
-    --skip-seed)  SKIP_SEED=true ;;
+    --skip-build)    SKIP_DOCKER_BUILD=true ;;
+    --skip-seed)     SKIP_SEED=true ;;
+    --skip-services) SKIP_SERVICES=true ;;
   esac
 done
 
@@ -63,10 +66,11 @@ CREATE_VPC_ENDPOINTS="${CREATE_VPC_ENDPOINTS:-false}"
 ALLOWED_SSH_CIDR="${ALLOWED_SSH_CIDR:-127.0.0.1/32}"
 # IMPORTANT: Table name must match STACK_NAME (IAM policy: table/${StackName})
 DYNAMODB_TABLE="${DYNAMODB_TABLE:-$STACK_NAME}"
-DYNAMODB_REGION="${DYNAMODB_REGION:-us-east-2}"
+DYNAMODB_REGION="${DYNAMODB_REGION:-$REGION}"
 WORKSPACE_BUCKET_NAME="${WORKSPACE_BUCKET_NAME:-}"
 SKIP_DOCKER_BUILD="${SKIP_DOCKER_BUILD:-false}"
 SKIP_SEED="${SKIP_SEED:-false}"
+SKIP_SERVICES="${SKIP_SERVICES:-false}"
 
 # ── Validate required fields ──────────────────────────────────────────────────
 [ -z "${ADMIN_PASSWORD:-}" ]  && error "ADMIN_PASSWORD is required. Set it in .env"
@@ -102,13 +106,14 @@ else
 echo "  VPC:         (new — will be created)"
 fi
 echo "  VPC Endpoints: $CREATE_VPC_ENDPOINTS"
-echo "  Skip build:  $SKIP_DOCKER_BUILD"
-echo "  Skip seed:   $SKIP_SEED"
+echo "  Skip build:    $SKIP_DOCKER_BUILD"
+echo "  Skip seed:     $SKIP_SEED"
+echo "  Skip services: $SKIP_SERVICES"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
 # ── Step 1: Prerequisites check ───────────────────────────────────────────────
-info "[1/7] Checking prerequisites..."
+info "[1/8] Checking prerequisites..."
 
 CLI_VERSION=$(aws --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "0.0")
 CLI_MAJOR=$(echo "$CLI_VERSION" | cut -d. -f1)
@@ -123,7 +128,7 @@ success "AWS CLI $CLI_VERSION"
 # No local Docker required.
 
 # ── Step 2: CloudFormation ────────────────────────────────────────────────────
-info "[2/7] Deploying CloudFormation stack..."
+info "[2/8] Deploying CloudFormation stack..."
 
 CFN_PARAMS="ParameterKey=WorkspaceBucketName,ParameterValue=${WORKSPACE_BUCKET_NAME}"
 CFN_PARAMS="$CFN_PARAMS ParameterKey=OpenClawModel,ParameterValue=${MODEL}"
@@ -171,6 +176,16 @@ S3_BUCKET=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --regi
   --query 'Stacks[0].Outputs[?OutputKey==`TenantWorkspaceBucketName`].OutputValue' --output text)
 INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' --output text)
+ECS_CLUSTER=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`AlwaysOnEcsClusterName`].OutputValue' --output text)
+ECS_TASK_DEF=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`AlwaysOnTaskDefinitionArn`].OutputValue' --output text)
+ECS_TASK_SG=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`AlwaysOnTaskSecurityGroupId`].OutputValue' --output text)
+ECS_SUBNET=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`AlwaysOnSubnetId`].OutputValue' --output text)
+EFS_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`AlwaysOnEFSId`].OutputValue' --output text)
 
 success "Stack ready — EC2: $INSTANCE_ID | S3: $S3_BUCKET"
 
@@ -178,7 +193,7 @@ success "Stack ready — EC2: $INSTANCE_ID | S3: $S3_BUCKET"
 # Always builds on the gateway EC2 (ARM64 Graviton, Docker pre-installed, fast ECR network).
 # No local Docker required. Source code is packaged → S3 → EC2 build → ECR push.
 if [ "$SKIP_DOCKER_BUILD" = "true" ]; then
-  info "[3/7] Skipping Docker build (--skip-build)"
+  info "[3/8] Skipping Docker build (--skip-build)"
   IMAGE_COUNT=$(aws ecr describe-images --repository-name "${STACK_NAME}-multitenancy-agent" \
     --region "$REGION" --query 'length(imageDetails)' --output text 2>/dev/null || echo "0")
   if [ "$IMAGE_COUNT" = "0" ] || [ -z "$IMAGE_COUNT" ]; then
@@ -188,7 +203,7 @@ if [ "$SKIP_DOCKER_BUILD" = "true" ]; then
     success "  ECR repo has $IMAGE_COUNT image(s)"
   fi
 else
-  info "[3/7] Building Agent Container on EC2 (~10-15 min, no local Docker needed)..."
+  info "[3/8] Building Agent Container on EC2 (~10-15 min, no local Docker needed)..."
 
   # Wait for EC2 to be SSM-reachable (it just launched from CloudFormation)
   info "  Waiting for EC2 SSM agent to become available..."
@@ -207,11 +222,13 @@ else
   COPYFILE_DISABLE=1 tar czf "$TARBALL" \
     -C "$SCRIPT_DIR/.." \
     enterprise/agent-container \
-    enterprise/exec-agent 2>/dev/null || \
+    enterprise/exec-agent \
+    enterprise/auth-agent 2>/dev/null || \
   tar czf "$TARBALL" \
     -C "$SCRIPT_DIR/.." \
     enterprise/agent-container \
-    enterprise/exec-agent
+    enterprise/exec-agent \
+    enterprise/auth-agent
   aws s3 cp "$TARBALL" "s3://${S3_BUCKET}/_build/agent-build.tar.gz" \
     --region "$REGION" --quiet
   rm -f "$TARBALL"
@@ -232,7 +249,7 @@ else
       \"aws s3 cp s3://${S3_BUCKET}/_build/agent-build.tar.gz . --region ${REGION}\",
       \"tar xzf agent-build.tar.gz\",
       \"aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin \${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com\",
-      \"docker build -f enterprise/agent-container/Dockerfile -t \${ECR_URI}:latest .\",
+      \"docker build -f enterprise/agent-container/Dockerfile -t \${ECR_URI}:latest enterprise/\",
       \"docker push \${ECR_URI}:latest\",
       \"echo BUILD_AND_PUSH_COMPLETE\"
     ]" \
@@ -264,7 +281,7 @@ else
 fi
 
 # ── Step 4: AgentCore Runtime ─────────────────────────────────────────────────
-info "[4/7] Creating AgentCore Runtime..."
+info "[4/8] Creating AgentCore Runtime..."
 
 EXISTING_RUNTIME=$(aws ssm get-parameter \
   --name "/openclaw/${STACK_NAME}/runtime-id" \
@@ -309,7 +326,7 @@ aws ssm put-parameter \
   --region "$REGION" &>/dev/null
 
 # ── Step 5: Upload SOUL templates and knowledge docs ──────────────────────────
-info "[5/7] Uploading templates and knowledge to S3..."
+info "[5/8] Uploading templates and knowledge to S3..."
 
 export AWS_REGION="$REGION"
 export S3_BUCKET
@@ -330,7 +347,7 @@ success "Templates uploaded to s3://${S3_BUCKET}/"
 TABLE_STATUS=$(aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" \
   --region "$DYNAMODB_REGION" --query 'Table.TableStatus' --output text 2>/dev/null || echo "NOT_FOUND")
 if [ "$TABLE_STATUS" = "NOT_FOUND" ]; then
-  info "[6/7] Creating DynamoDB table $DYNAMODB_TABLE in $DYNAMODB_REGION..."
+  info "[6/8] Creating DynamoDB table $DYNAMODB_TABLE in $DYNAMODB_REGION..."
   aws dynamodb create-table \
     --table-name "$DYNAMODB_TABLE" \
     --attribute-definitions \
@@ -359,9 +376,9 @@ else
 fi
 
 if [ "$SKIP_SEED" = "true" ]; then
-  info "[6/7] Skipping DynamoDB seed (--skip-seed)"
+  info "[6/8] Skipping DynamoDB seed (--skip-seed)"
 else
-  info "[6/7] Seeding DynamoDB..."
+  info "[6/8] Seeding DynamoDB..."
   SEED_DIR="$SCRIPT_DIR/admin-console/server"
 
   # Store ADMIN_PASSWORD in SSM (EC2 reads it on startup)
@@ -380,6 +397,13 @@ else
   fi
 
   cd "$SEED_DIR"
+  if ! command -v pip3 &>/dev/null; then
+    info "  Installing pip3..."
+    sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip 2>/dev/null \
+      || sudo yum install -y python3-pip 2>/dev/null \
+      || { error "Failed to install pip3. Please install it manually."; exit 1; }
+  fi
+  pip3 install -q -r requirements.txt
   AWS_REGION="$DYNAMODB_REGION" python3 seed_dynamodb.py --table "$DYNAMODB_TABLE" --region "$DYNAMODB_REGION" && \
     success "  Org data seeded (employees, positions, departments)"
 
@@ -402,136 +426,141 @@ else
     success "  SSM tenant→position mappings created"
 fi
 
-# ── Step 7: Deploy Admin Console + Gateway Services to EC2 ────────────────────
-info "[7/9] Building and deploying Admin Console..."
+# ── Step 7: Store secrets + write /etc/openclaw/env ──────────────────────────
+info "[7/8] Storing secrets in SSM + writing EC2 env file..."
 
-# Build frontend (requires Node.js locally)
-if command -v npm &>/dev/null; then
-  ADMIN_DIR="$SCRIPT_DIR/admin-console"
-  cd "$ADMIN_DIR"
-  npm install --silent 2>/dev/null
-  npm run build 2>/dev/null
-  cd "$SCRIPT_DIR/.."
+aws ssm put-parameter \
+  --name "/openclaw/${STACK_NAME}/admin-password" \
+  --value "$ADMIN_PASSWORD" \
+  --type SecureString \
+  --overwrite \
+  --region "$REGION" > /dev/null 2>&1
+success "  admin-password stored"
 
-  # Package and upload
-  ADMIN_TAR="/tmp/admin-deploy-$$.tar.gz"
-  COPYFILE_DISABLE=1 tar czf "$ADMIN_TAR" \
-    -C "$SCRIPT_DIR/admin-console" dist server start.sh 2>/dev/null || \
-  tar czf "$ADMIN_TAR" \
-    -C "$SCRIPT_DIR/admin-console" dist server start.sh
-  aws s3 cp "$ADMIN_TAR" "s3://${S3_BUCKET}/_deploy/admin-deploy.tar.gz" \
-    --region "$REGION" --quiet
-  rm -f "$ADMIN_TAR"
-  success "  Admin Console packaged → S3"
-else
-  warn "  npm not found — skipping Admin Console build. Deploy manually (see README Step 4)."
-fi
+aws ssm put-parameter \
+  --name "/openclaw/${STACK_NAME}/jwt-secret" \
+  --value "$JWT_SECRET" \
+  --type SecureString \
+  --overwrite \
+  --region "$REGION" > /dev/null 2>&1
+success "  jwt-secret stored"
 
-# Upload gateway service files
-info "[8/9] Uploading Gateway services..."
-GW_DIR="$SCRIPT_DIR/gateway"
-if [ -d "$GW_DIR" ]; then
-  for f in tenant_router.py bedrock_proxy_h2.js bedrock-proxy-h2.service tenant-router.service; do
-    [ -f "$GW_DIR/$f" ] && aws s3 cp "$GW_DIR/$f" "s3://${S3_BUCKET}/_deploy/$f" --region "$REGION" --quiet
-  done
-  success "  Gateway files uploaded to S3"
-else
-  warn "  enterprise/gateway/ not found — skipping gateway upload"
-fi
+# Write env file locally, upload to S3, then pull onto EC2 via SSM.
+# This avoids fragile JSON-in-JSON escaping — variable values with quotes,
+# dollars, or backslashes are written safely to a plain file.
+ENV_TMPFILE="/tmp/openclaw-env-$$"
+cat > "$ENV_TMPFILE" <<ENVEOF
+STACK_NAME=${STACK_NAME}
+AWS_REGION=${REGION}
+SSM_REGION=${REGION}
+GATEWAY_REGION=${REGION}
+S3_BUCKET=${S3_BUCKET}
+DYNAMODB_TABLE=${DYNAMODB_TABLE}
+DYNAMODB_REGION=${DYNAMODB_REGION}
+AGENTCORE_RUNTIME_ID=${RUNTIME_ID}
+BEDROCK_MODEL_ID=${MODEL}
+ECS_CLUSTER=${ECS_CLUSTER}
+ECS_TASK_DEF=${ECS_TASK_DEF}
+ECS_TASK_SG=${ECS_TASK_SG}
+ECS_SUBNET=${ECS_SUBNET}
+EFS_ID=${EFS_ID}
+ENVEOF
+aws s3 cp "$ENV_TMPFILE" "s3://${S3_BUCKET}/_deploy/env" --region "$REGION" --quiet
+rm -f "$ENV_TMPFILE"
+success "  env file uploaded to S3"
 
-# ── Step 9: Configure EC2 — install everything via SSM ────────────────────────
-info "[9/9] Configuring EC2 (Admin Console + Gateway + env)..."
-
-# Get ECS outputs for /etc/openclaw/env
-ECS_CLUSTER=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`AlwaysOnEcsClusterName`].OutputValue' --output text 2>/dev/null || echo "")
-ECS_SUBNET=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`AlwaysOnSubnetId`].OutputValue' --output text 2>/dev/null || echo "")
-ECS_SG=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`AlwaysOnTaskSecurityGroupId`].OutputValue' --output text 2>/dev/null || echo "")
-
-EC2_CMD_ID=$(aws ssm send-command \
+info "  Installing /etc/openclaw/env on EC2..."
+ENV_CMD_ID=$(aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name "AWS-RunShellScript" \
   --region "$REGION" \
-  --timeout-seconds 300 \
-  --parameters "commands=[
-    \"set -e\",
-    \"# ── Write /etc/openclaw/env (all services read this) ──\",
-    \"mkdir -p /etc/openclaw\",
-    \"cat > /etc/openclaw/env << 'ENVEOF'
-STACK_NAME=${STACK_NAME}
-AWS_REGION=${REGION}
-GATEWAY_REGION=${REGION}
-DYNAMODB_TABLE=${DYNAMODB_TABLE}
-DYNAMODB_REGION=${DYNAMODB_REGION}
-S3_BUCKET=${S3_BUCKET}
-GATEWAY_INSTANCE_ID=${INSTANCE_ID}
-ECS_CLUSTER_NAME=${ECS_CLUSTER}
-ECS_SUBNET_ID=${ECS_SUBNET}
-ECS_TASK_SG_ID=${ECS_SG}
-AGENTCORE_RUNTIME_ID=${RUNTIME_ID}
-ENVEOF\",
-    \"echo '[deploy] /etc/openclaw/env written'\",
-    \"# ── Install Admin Console ──\",
-    \"python3 -m venv /opt/admin-venv 2>/dev/null || true\",
-    \"/opt/admin-venv/bin/pip install -q fastapi uvicorn boto3 requests python-multipart anthropic 2>/dev/null || true\",
-    \"aws s3 cp s3://${S3_BUCKET}/_deploy/admin-deploy.tar.gz /tmp/admin-deploy.tar.gz --region ${REGION} 2>/dev/null || true\",
-    \"if [ -f /tmp/admin-deploy.tar.gz ]; then mkdir -p /opt/admin-console && tar xzf /tmp/admin-deploy.tar.gz -C /opt/admin-console && chown -R ubuntu:ubuntu /opt/admin-console /opt/admin-venv && chmod +x /opt/admin-console/start.sh; fi\",
-    \"# ── Admin Console systemd ──\",
-    \"cat > /etc/systemd/system/openclaw-admin.service << 'SVCEOF'
-[Unit]
-Description=OpenClaw Admin Console
-After=network.target
-[Service]
-Type=simple
-User=ubuntu
-EnvironmentFile=/etc/openclaw/env
-ExecStart=/opt/admin-console/start.sh
-Restart=always
-RestartSec=5
-[Install]
-WantedBy=multi-user.target
-SVCEOF\",
-    \"# ── Install Gateway services ──\",
-    \"pip3 install --break-system-packages --upgrade boto3 botocore requests 2>/dev/null || true\",
-    \"aws s3 cp s3://${S3_BUCKET}/_deploy/tenant_router.py /home/ubuntu/tenant_router.py --region ${REGION} 2>/dev/null || true\",
-    \"aws s3 cp s3://${S3_BUCKET}/_deploy/bedrock_proxy_h2.js /home/ubuntu/bedrock_proxy_h2.js --region ${REGION} 2>/dev/null || true\",
-    \"aws s3 cp s3://${S3_BUCKET}/_deploy/tenant-router.service /etc/systemd/system/tenant-router.service --region ${REGION} 2>/dev/null || true\",
-    \"aws s3 cp s3://${S3_BUCKET}/_deploy/bedrock-proxy-h2.service /etc/systemd/system/bedrock-proxy-h2.service --region ${REGION} 2>/dev/null || true\",
-    \"chown ubuntu:ubuntu /home/ubuntu/tenant_router.py /home/ubuntu/bedrock_proxy_h2.js 2>/dev/null || true\",
-    \"# ── Start all services ──\",
-    \"systemctl daemon-reload\",
-    \"systemctl enable openclaw-admin tenant-router bedrock-proxy-h2 openclaw-gateway 2>/dev/null || true\",
-    \"systemctl restart openclaw-admin tenant-router bedrock-proxy-h2 openclaw-gateway 2>/dev/null || true\",
-    \"echo ALL_SERVICES_STARTED\"
-  ]" \
-  --output text --query 'Command.CommandId' 2>/dev/null) || warn "EC2 SSM command failed"
+  --parameters 'commands=["mkdir -p /etc/openclaw","aws s3 cp s3://'"${S3_BUCKET}"'/_deploy/env /etc/openclaw/env --region '"${REGION}"'","echo ENV_WRITTEN"]' \
+  --query 'Command.CommandId' --output text)
 
-if [ -n "$EC2_CMD_ID" ]; then
-  info "  SSM command: $EC2_CMD_ID — waiting for completion..."
-  for i in $(seq 1 20); do
-    sleep 5
-    CMD_STATUS=$(aws ssm get-command-invocation \
-      --command-id "$EC2_CMD_ID" --instance-id "$INSTANCE_ID" \
-      --region "$REGION" --query 'Status' --output text 2>/dev/null || echo "Pending")
-    case "$CMD_STATUS" in
-      Success) success "  EC2 fully configured — all services started"; break ;;
-      Failed)  warn "  EC2 config had errors (check SSM output)"; break ;;
-      *) echo -n "." ;;
+# Wait for env file write to complete (Step 8 depends on it)
+info "  Waiting for env file installation..."
+for i in $(seq 1 20); do
+  sleep 5
+  ENV_STATUS=$(aws ssm get-command-invocation \
+    --command-id "$ENV_CMD_ID" \
+    --instance-id "$INSTANCE_ID" \
+    --region "$REGION" \
+    --query 'Status' --output text 2>/dev/null || echo "Pending")
+  case "$ENV_STATUS" in
+    Success)
+      success "  /etc/openclaw/env written on EC2"
+      break ;;
+    Failed|Cancelled|TimedOut)
+      error "  env file installation failed ($ENV_STATUS)" ;;
+    *)
+      echo -n "." ;;
+  esac
+done
+[ "$ENV_STATUS" != "Success" ] && error "env file installation timed out"
+
+# ── Step 8: Deploy services to EC2 ──────────────────────────────────────────
+if [ "$SKIP_SERVICES" = "true" ]; then
+  info "[8/8] Skipping service deployment (--skip-services)"
+else
+  info "[8/8] Deploying admin console + gateway services to EC2..."
+
+  # Package admin-console + gateway + ec2-setup.sh → S3
+  info "  Packaging services → S3..."
+  SVC_TARBALL="/tmp/services-$$.tar.gz"
+  COPYFILE_DISABLE=1 tar czf "$SVC_TARBALL" \
+    -C "$SCRIPT_DIR/.." \
+    enterprise/admin-console \
+    enterprise/gateway \
+    enterprise/ec2-setup.sh 2>/dev/null || \
+  tar czf "$SVC_TARBALL" \
+    -C "$SCRIPT_DIR/.." \
+    enterprise/admin-console \
+    enterprise/gateway \
+    enterprise/ec2-setup.sh
+  aws s3 cp "$SVC_TARBALL" "s3://${S3_BUCKET}/_deploy/services.tar.gz" \
+    --region "$REGION" --quiet
+  rm -f "$SVC_TARBALL"
+  success "  Services uploaded to S3"
+
+  # Run ec2-setup.sh on EC2 via SSM
+  info "  Running ec2-setup.sh on EC2 (builds admin console, installs services)..."
+  SVC_CMD_ID=$(aws ssm send-command \
+    --instance-ids "$INSTANCE_ID" \
+    --document-name "AWS-RunShellScript" \
+    --region "$REGION" \
+    --timeout-seconds 900 \
+    --parameters "commands=[
+      \"set -ex\",
+      \"cd /tmp && rm -rf openclaw-services && mkdir openclaw-services && cd openclaw-services\",
+      \"aws s3 cp s3://${S3_BUCKET}/_deploy/services.tar.gz . --region ${REGION}\",
+      \"tar xzf services.tar.gz\",
+      \"bash enterprise/ec2-setup.sh\"
+    ]" \
+    --query 'Command.CommandId' --output text)
+
+  info "  SSM command: $SVC_CMD_ID — polling for completion..."
+  # Poll every 30s up to 15 minutes
+  for i in $(seq 1 30); do
+    sleep 30
+    SVC_STATUS=$(aws ssm get-command-invocation \
+      --command-id "$SVC_CMD_ID" \
+      --instance-id "$INSTANCE_ID" \
+      --region "$REGION" \
+      --query 'Status' --output text 2>/dev/null || echo "Pending")
+    case "$SVC_STATUS" in
+      Success)
+        success "  Service deployment complete"
+        break ;;
+      Failed|Cancelled|TimedOut)
+        STDERR=$(aws ssm get-command-invocation \
+          --command-id "$SVC_CMD_ID" --instance-id "$INSTANCE_ID" \
+          --region "$REGION" --query 'StandardErrorContent' --output text 2>/dev/null | tail -20)
+        error "Service deployment failed ($SVC_STATUS):\n$STDERR" ;;
+      *)
+        echo -n "." ;;
     esac
   done
-fi
-
-# ── Step 9.5: Allow ECS tasks to reach SSM VPC endpoint (if VPC endpoints exist) ──
-SSM_EP_SG=$(aws ec2 describe-vpc-endpoints --region "$REGION" \
-  --filters "Name=service-name,Values=com.amazonaws.${REGION}.ssm" \
-  --query 'VpcEndpoints[0].Groups[0].GroupId' --output text 2>/dev/null || echo "")
-if [ -n "$SSM_EP_SG" ] && [ "$SSM_EP_SG" != "None" ] && [ -n "$ECS_SG" ] && [ "$ECS_SG" != "None" ]; then
-  aws ec2 authorize-security-group-ingress \
-    --group-id "$SSM_EP_SG" --protocol tcp --port 443 \
-    --source-group "$ECS_SG" --region "$REGION" 2>/dev/null && \
-    success "  ECS→SSM VPC endpoint SG rule added" || true
+  [ "$SVC_STATUS" != "Success" ] && error "Service deployment timed out after 15 min"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
@@ -545,18 +574,14 @@ echo "  Runtime:    $RUNTIME_ID"
 echo "  S3:         $S3_BUCKET"
 echo "  EC2:        $INSTANCE_ID"
 echo ""
-echo "  Next steps:"
-echo ""
-echo "  1. Wait ~5 min for EC2 to finish bootstrapping"
-echo ""
-echo "  2. Access Admin Console:"
+echo "  Access Admin Console:"
 echo "     aws ssm start-session --target $INSTANCE_ID --region $REGION \\"
 echo "       --document-name AWS-StartPortForwardingSession \\"
 echo "       --parameters 'portNumber=8099,localPortNumber=8099'"
 echo "     → Open http://localhost:8099"
 echo "     → Login: emp-jiade / password: (your ADMIN_PASSWORD)"
 echo ""
-echo "  3. Connect IM bots (one-time, in OpenClaw Gateway UI):"
+echo "  Connect IM bots (one-time, in OpenClaw Gateway UI):"
 echo "     aws ssm start-session --target $INSTANCE_ID --region $REGION \\"
 echo "       --document-name AWS-StartPortForwardingSession \\"
 echo "       --parameters 'portNumber=18789,localPortNumber=18789'"
