@@ -1202,4 +1202,4 @@ openclaw status
 
 ---
 
-Built by [wjiad@aws](mailto:wjiad@amazon.com) · [aws-samples](https://github.com/aws-samples) · Contributions welcome
+Built by [wjiad@aws](mailto:wjiad@amazon.com) · [qingyuan18](https://github.com/qingyuan18/sample-OpenClaw-on-AWS-with-Bedrock) · Contributions welcome
