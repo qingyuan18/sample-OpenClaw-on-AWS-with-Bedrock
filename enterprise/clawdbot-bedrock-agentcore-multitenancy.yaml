@@ -327,6 +327,8 @@ Resources:
                 Action:
                   - 'ssm:PutParameter'
                   - 'ssm:GetParameter'
+                  - 'ssm:GetParametersByPath'
+                  - 'ssm:DeleteParameter'
                 Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/openclaw/${AWS::StackName}/*'
         - PolicyName: AgentCoreAccessPolicy
           PolicyDocument:
@@ -1145,11 +1147,14 @@ Resources:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
             - Name: S3_BUCKET
-              Value: !Sub "openclaw-tenants-${AWS::AccountId}"
+              Value: !If
+                - HasCustomBucketName
+                - !Ref WorkspaceBucketName
+                - !Sub "openclaw-tenants-${AWS::AccountId}"
             - Name: DYNAMODB_TABLE
-              Value: openclaw-enterprise
+              Value: !Ref AWS::StackName
             - Name: DYNAMODB_REGION
-              Value: us-east-2
+              Value: !Ref AWS::Region
             - Name: PORT
               Value: "8080"
             - Name: SYNC_INTERVAL

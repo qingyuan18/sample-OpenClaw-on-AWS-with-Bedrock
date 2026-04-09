@@ -411,7 +411,7 @@ export default function Employees() {
             if (!deletingEmp) return;
             deleteEmployee.mutate({ empId: deletingEmp.id, force: true }, {
               onSuccess: () => setDeletingEmp(null),
-              onError: (err: any) => setDeleteError(err?.response?.data?.message || err?.message || 'Delete failed'),
+              onError: (err: any) => setDeleteError(String(err?.response?.data?.message || err?.response?.data?.detail || err?.message || 'Delete failed')),
             });
           }}>{deleteEmployee.isPending ? 'Deleting…' : 'Force Delete (cascade)'}</Button>
         ) : (
@@ -424,9 +424,9 @@ export default function Employees() {
                 const data = err?.response?.data;
                 if (data?.error === 'employee_has_bindings') {
                   setDeleteBlockInfo({ agentBindings: data.agentBindings, imMappings: data.imMappings });
-                  setDeleteError(data.message);
+                  setDeleteError(String(data.message || 'Employee has active bindings'));
                 } else {
-                  setDeleteError(data?.message || err?.message || 'Delete failed');
+                  setDeleteError(String(data?.message || data?.detail || err?.message || 'Delete failed'));
                 }
               },
             });

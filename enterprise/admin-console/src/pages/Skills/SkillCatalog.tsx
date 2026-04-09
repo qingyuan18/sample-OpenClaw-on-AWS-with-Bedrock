@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { Puzzle, Plus, Search, Key, Shield, Upload, Package, Container as ContainerIcon, Cloud, CheckCircle, Lock, Users } from 'lucide-react';
-import { Card, StatCard, Badge, Button, PageHeader, Table, Modal, Input, Select, Tabs } from '../../components/ui';
-import { useSkills, useSkillKeys, usePositions } from '../../hooks/useApi';
+import {
+  Puzzle, Search, Key, Package, Cloud, CheckCircle, Lock,
+  ArrowRight, AlertTriangle, Zap, X,
+} from 'lucide-react';
+import { Card, StatCard, Badge, Button, PageHeader, Table, Modal, Select, Tabs } from '../../components/ui';
+import { useSkills, useSkillKeys, usePositions, useAssignSkill, useUnassignSkill } from '../../hooks/useApi';
 import type { SkillManifest, SkillApiKey } from '../../hooks/useApi';
 
 const layerColor = (l: number): 'primary' | 'success' | 'info' => l === 1 ? 'primary' : l === 2 ? 'success' : 'info';
@@ -11,10 +14,192 @@ const statusColor = (s: string): 'success' | 'warning' | 'danger' | 'info' | 'de
 const categoryIcon: Record<string, string> = {
   information: '🔍', communication: '📧', collaboration: '📝', 'project-management': '📋',
   crm: '💼', erp: '🏦', development: '💻', data: '📊', productivity: '⚡', utility: '🔧',
+  creative: '🎨',
 };
 
+// ─── Skill Detail Modal (redesigned with assign action) ─────────────────────
+
+function SkillDetailModal({ skill, apiKeys, onClose }: {
+  skill: SkillManifest; apiKeys: SkillApiKey[]; onClose: () => void;
+}) {
+  const { data: positions = [] } = usePositions();
+  const assignSkill = useAssignSkill();
+  const unassignSkill = useUnassignSkill();
+  const [assignPos, setAssignPos] = useState('');
+  const [assignResult, setAssignResult] = useState<string | null>(null);
+
+  const skillName = skill.name || skill.id?.replace('sk-', '') || '';
+
+  // Which positions already have this skill?
+  const assignedPositions = positions.filter(p =>
+    (p.defaultSkills || []).includes(skillName)
+  );
+
+  // Prerequisites check
+  const requiredEnvs = skill.requires?.env || [];
+  const keyStatuses = requiredEnvs.map(env => {
+    const key = apiKeys.find(k => k.skillName === skillName && k.envVar === env);
+    return { env, status: key?.status || 'not-configured', awsService: key?.awsService || '', note: key?.note || '' };
+  });
+  const allKeysReady = requiredEnvs.length === 0 || keyStatuses.every(k => k.status === 'iam-role' || k.status === 'active');
+
+  const unassignedPositions = positions.filter(p =>
+    !(p.defaultSkills || []).includes(skillName)
+  );
+
+  const handleAssign = () => {
+    if (!assignPos) return;
+    assignSkill.mutate({ skillName, positionId: assignPos }, {
+      onSuccess: (data) => {
+        const posName = positions.find(p => p.id === assignPos)?.name || assignPos;
+        setAssignResult(`Assigned to ${posName} — ${data.agentsPropagated} agent(s) updated`);
+        setAssignPos('');
+      },
+    });
+  };
+
+  const handleUnassign = (posId: string) => {
+    unassignSkill.mutate({ skillName, positionId: posId });
+  };
+
+  return (
+    <Modal open={true} onClose={onClose} title={skill.name || skillName} size="lg">
+      <div className="space-y-5">
+        {/* Header info */}
+        <div className="flex items-start gap-4">
+          <span className="text-3xl">{categoryIcon[skill.category] || '🧩'}</span>
+          <div className="flex-1">
+            <p className="text-sm text-text-secondary mb-2">{skill.description}</p>
+            <div className="flex flex-wrap gap-2">
+              <Badge color={layerColor(skill.layer)}>Layer {skill.layer}</Badge>
+              <Badge>{skill.category}</Badge>
+              <Badge color={skill.scope === 'global' ? 'info' : 'default'}>{skill.scope}</Badge>
+              <Badge color={statusColor(skill.status || 'installed')} dot>{skill.status || 'installed'}</Badge>
+              <span className="text-xs text-text-muted">v{skill.version} · {skill.author}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Step 1: Prerequisites */}
+        <div className="rounded-xl border border-dark-border/50 bg-surface-dim px-4 py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-bold">1</span>
+            <p className="text-sm font-medium text-text-primary">Prerequisites</p>
+            {allKeysReady ? (
+              <Badge color="success" dot>Ready</Badge>
+            ) : (
+              <Badge color="warning" dot>Action needed</Badge>
+            )}
+          </div>
+          {requiredEnvs.length === 0 ? (
+            <p className="text-xs text-text-muted ml-7">No API keys or external credentials needed.</p>
+          ) : (
+            <div className="ml-7 space-y-1.5">
+              {keyStatuses.map(k => (
+                <div key={k.env} className="flex items-center justify-between rounded-lg bg-dark-bg px-3 py-2">
+                  <code className="text-xs text-primary-light">{k.env}</code>
+                  <div className="flex items-center gap-2">
+                    {k.status === 'iam-role' ? (
+                      <Badge color="success" dot>IAM Role</Badge>
+                    ) : k.status === 'active' ? (
+                      <Badge color="success" dot>Configured</Badge>
+                    ) : (
+                      <Badge color="danger" dot>Missing</Badge>
+                    )}
+                    <span className="text-[10px] text-text-muted">{k.note}</span>
+                  </div>
+                </div>
+              ))}
+              {!allKeysReady && (
+                <p className="text-xs text-warning mt-1 flex items-center gap-1">
+                  <AlertTriangle size={11} /> Configure missing keys in API Key Vault tab before assigning.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Step 2: Assign to Position */}
+        <div className="rounded-xl border border-dark-border/50 bg-surface-dim px-4 py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-bold">2</span>
+            <p className="text-sm font-medium text-text-primary">Assign to Position</p>
+          </div>
+
+          {/* Already assigned */}
+          {assignedPositions.length > 0 && (
+            <div className="ml-7 mb-3">
+              <p className="text-xs text-text-muted mb-1.5">Currently assigned to:</p>
+              <div className="flex flex-wrap gap-2">
+                {assignedPositions.map(p => (
+                  <div key={p.id} className="flex items-center gap-1.5 rounded-lg bg-success/10 border border-success/20 px-2.5 py-1">
+                    <CheckCircle size={12} className="text-success" />
+                    <span className="text-xs font-medium text-text-primary">{p.name}</span>
+                    <button onClick={() => handleUnassign(p.id)} className="text-text-muted hover:text-danger ml-1" title="Remove from position">
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {assignResult && (
+            <div className="ml-7 mb-3 rounded-lg bg-success/10 border border-success/20 px-3 py-2 text-xs text-success">
+              <CheckCircle size={12} className="inline mr-1" /> {assignResult}
+            </div>
+          )}
+
+          {/* Assign new */}
+          <div className="ml-7 flex items-end gap-2">
+            <div className="flex-1">
+              <Select
+                label=""
+                value={assignPos}
+                onChange={setAssignPos}
+                options={unassignedPositions.map(p => ({ label: `${p.name} (${p.departmentName})`, value: p.id }))}
+                placeholder="Select position to assign..."
+              />
+            </div>
+            <Button variant="primary" size="sm" disabled={!assignPos || !allKeysReady || assignSkill.isPending} onClick={handleAssign}>
+              <Zap size={12} /> {assignSkill.isPending ? 'Assigning...' : 'Assign'}
+            </Button>
+          </div>
+          {!allKeysReady && (
+            <p className="ml-7 text-[10px] text-text-muted mt-1">Complete prerequisites first to enable assignment.</p>
+          )}
+        </div>
+
+        {/* Step 3: What happens next */}
+        <div className="rounded-xl border border-dark-border/50 bg-surface-dim px-4 py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-bold">3</span>
+            <p className="text-sm font-medium text-text-primary">Agents auto-load</p>
+          </div>
+          <p className="text-xs text-text-muted ml-7">
+            All agents in the assigned position will load this skill at their next session start.
+            Employees can then use it via any IM channel or Portal chat — no action needed on their side.
+          </p>
+        </div>
+
+        {/* Access control */}
+        {(skill.permissions?.blockedRoles?.length > 0 || skill.approvalRequired) && (
+          <div className="rounded-lg bg-warning/5 border border-warning/20 px-3 py-2 text-xs text-text-muted">
+            {skill.approvalRequired && <p className="text-warning mb-1">This skill requires admin approval for each use.</p>}
+            {skill.permissions.blockedRoles.length > 0 && (
+              <p>Blocked roles: {skill.permissions.blockedRoles.map(r => <Badge key={r} color="danger">{r}</Badge>)}</p>
+            )}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Main Page ──────────────────────────────────────────────────────────────
+
 export default function SkillCatalog() {
-  const { data: skills = [], isLoading } = useSkills();
+  const { data: skills = [] } = useSkills();
   const { data: apiKeys = [] } = useSkillKeys();
   const { data: positions = [] } = usePositions();
   const [activeTab, setActiveTab] = useState('catalog');
@@ -22,13 +207,19 @@ export default function SkillCatalog() {
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterText, setFilterText] = useState('');
   const [selectedSkill, setSelectedSkill] = useState<SkillManifest | null>(null);
-  const [showInstall, setShowInstall] = useState(false);
+  const [showGuide, setShowGuide] = useState(true);
 
   const installed = skills.filter(s => (s.status || 'installed') === 'installed');
   const l1 = installed.filter(s => s.layer === 1);
   const l2 = installed.filter(s => s.layer === 2);
   const l3 = installed.filter(s => s.layer === 3);
   const categories = [...new Set(skills.map(s => s.category))].sort();
+
+  // Count skills that are assigned to at least one position
+  const assignedCount = installed.filter(s => {
+    const name = s.name || s.id?.replace('sk-', '') || '';
+    return positions.some(p => (p.defaultSkills || []).includes(name));
+  }).length;
 
   const filtered = skills.filter(s => {
     const matchText = !filterText || s.name.includes(filterText.toLowerCase()) || s.description.toLowerCase().includes(filterText.toLowerCase());
@@ -41,20 +232,75 @@ export default function SkillCatalog() {
     <div>
       <PageHeader
         title="Skill Platform"
-        description={`${installed.length} skills installed · ${apiKeys.length} API keys managed · ${skills.filter(s => s.status === 'pending_review').length} pending review`}
+        description={`${installed.length} skills installed · ${assignedCount} assigned to positions · ${apiKeys.filter(k => k.status === 'not-configured').length} keys need config`}
         actions={
           <div className="flex gap-2">
             <Button variant="default" onClick={() => setActiveTab('keys')}><Key size={16} /> API Keys</Button>
-            <Button variant="primary" onClick={() => setShowInstall(true)}><Plus size={16} /> Add Skill</Button>
+            <Button variant="primary" onClick={() => setShowGuide(!showGuide)}>
+              {showGuide ? 'Hide Guide' : 'How to Use'}
+            </Button>
           </div>
         }
       />
 
+      {/* Quick Start Guide */}
+      {showGuide && (
+        <div className="mb-6 rounded-xl border-2 border-primary/30 bg-primary/5 px-5 py-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-base font-semibold text-text-primary flex items-center gap-2">
+              <Zap size={18} className="text-primary" /> How Skills Work
+            </h3>
+            <button onClick={() => setShowGuide(false)} className="text-text-muted hover:text-text-primary"><X size={16} /></button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+            <div className="rounded-lg bg-dark-bg border border-dark-border/50 px-3 py-2.5">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-bold">1</span>
+                <p className="text-sm font-medium text-text-primary">Check Prerequisites</p>
+              </div>
+              <p className="text-xs text-text-muted">
+                AWS-native skills (Bedrock, SES, S3) use the EC2 IAM role — zero config.
+                Third-party skills (GitHub, Jira) need an API key in the Vault first.
+              </p>
+            </div>
+            <div className="rounded-lg bg-dark-bg border border-dark-border/50 px-3 py-2.5">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-bold">2</span>
+                <p className="text-sm font-medium text-text-primary">Assign to Position</p>
+              </div>
+              <p className="text-xs text-text-muted">
+                Click any skill below <ArrowRight size={10} className="inline" /> "Assign to Position" <ArrowRight size={10} className="inline" /> select a position.
+                All agents in that position get the skill automatically.
+              </p>
+            </div>
+            <div className="rounded-lg bg-dark-bg border border-dark-border/50 px-3 py-2.5">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-bold">3</span>
+                <p className="text-sm font-medium text-text-primary">Employees Use It</p>
+              </div>
+              <p className="text-xs text-text-muted">
+                Agents load assigned skills at session start. Employees just chat normally —
+                the agent decides when to use each skill based on the conversation.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg bg-dark-bg border border-dark-border/40 px-3 py-2.5 text-xs text-text-secondary">
+            <strong className="text-text-primary">Try it now:</strong> Click{' '}
+            <button onClick={() => {
+              const kb = skills.find(s => s.name?.includes('bedrock-kb'));
+              if (kb) setSelectedSkill(kb);
+            }} className="text-primary-light hover:underline">aws-bedrock-kb-search</button>{' '}
+            below — it uses IAM role (no API key needed), so you can assign it to any position right away.
+            Employees can then ask their agent to search your Bedrock Knowledge Base.
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-5 mb-6">
         <StatCard title="Total Installed" value={installed.length} icon={<Puzzle size={22} />} color="primary" />
-        <StatCard title="Layer 1 (Docker)" value={l1.length} icon={<ContainerIcon size={22} />} color="primary" subtitle="Built into image" />
+        <StatCard title="Layer 1 (Docker)" value={l1.length} icon={<Package size={22} />} color="primary" subtitle="Built into image" />
         <StatCard title="Layer 2 (S3)" value={l2.length} icon={<Cloud size={22} />} color="success" subtitle="Hot-loaded scripts" />
-        <StatCard title="Layer 3 (Bundle)" value={l3.length} icon={<Package size={22} />} color="info" subtitle="Pre-built packages" />
+        <StatCard title="Assigned" value={assignedCount} subtitle={`of ${installed.length} skills`} icon={<CheckCircle size={22} />} color={assignedCount > 0 ? 'success' : 'warning'} />
         <StatCard title="API Keys" value={apiKeys.length} icon={<Key size={22} />} color="warning" subtitle={`${apiKeys.filter(k => k.status === 'iam-role').length} via IAM, ${apiKeys.filter(k => k.status === 'not-configured').length} need config`} />
       </div>
 
@@ -103,9 +349,26 @@ export default function SkillCatalog() {
                 { key: 'layer', label: 'Layer', render: (s: SkillManifest) => <Badge color={layerColor(s.layer)}>L{s.layer}</Badge> },
                 { key: 'category', label: 'Category', render: (s: SkillManifest) => <Badge>{s.category}</Badge> },
                 { key: 'desc', label: 'Description', render: (s: SkillManifest) => <span className="text-xs text-text-secondary">{s.description}</span> },
-                { key: 'scope', label: 'Scope', render: (s: SkillManifest) => <Badge color={s.scope === 'global' ? 'info' : 'default'}>{s.scope}</Badge> },
-                { key: 'keys', label: 'Keys', render: (s: SkillManifest) => s.requires.env.length > 0 ? <Badge color="warning">{s.requires.env.length}</Badge> : <span className="text-xs text-text-muted">—</span> },
-                { key: 'access', label: 'Access', render: (s: SkillManifest) => <span className="text-xs text-text-muted">{s.permissions.allowedRoles.includes('*') ? 'All' : s.permissions.allowedRoles.join(', ')}</span> },
+                { key: 'prereqs', label: 'Prerequisites', render: (s: SkillManifest) => {
+                  const envs = s.requires?.env || [];
+                  if (envs.length === 0) return <Badge color="success">None</Badge>;
+                  const allOk = envs.every(env => {
+                    const k = apiKeys.find(ak => ak.skillName === (s.name || s.id?.replace('sk-', '')) && ak.envVar === env);
+                    return k && (k.status === 'iam-role' || k.status === 'active');
+                  });
+                  return allOk ? <Badge color="success" dot>Ready</Badge> : <Badge color="warning" dot>{envs.length} key{envs.length > 1 ? 's' : ''}</Badge>;
+                }},
+                { key: 'assigned', label: 'Assigned To', render: (s: SkillManifest) => {
+                  const name = s.name || s.id?.replace('sk-', '') || '';
+                  const assigned = positions.filter(p => (p.defaultSkills || []).includes(name));
+                  if (assigned.length === 0) return <span className="text-xs text-text-muted">—</span>;
+                  return (
+                    <div className="flex flex-wrap gap-1">
+                      {assigned.slice(0, 2).map(p => <Badge key={p.id} color="info">{p.name}</Badge>)}
+                      {assigned.length > 2 && <Badge>+{assigned.length - 2}</Badge>}
+                    </div>
+                  );
+                }},
                 { key: 'status', label: 'Status', render: (s: SkillManifest) => <Badge color={statusColor(s.status || 'installed')} dot>{(s.status || 'installed').replace('_', ' ')}</Badge> },
               ]}
               data={filtered}
@@ -117,7 +380,7 @@ export default function SkillCatalog() {
           <div className="mt-4">
             <div className="mb-4 rounded-lg bg-warning/5 border border-warning/20 px-4 py-3 text-sm text-warning">
               <div className="flex items-center gap-2 mb-1"><Lock size={14} /> API keys are stored as SecureString in SSM Parameter Store (KMS encrypted)</div>
-              <p className="text-xs text-text-muted">Keys are injected as environment variables at microVM startup. Employees never see the actual key values.</p>
+              <p className="text-xs text-text-muted">Keys marked "IAM Role" need no configuration — the EC2 instance role provides access automatically. Only third-party skills need manual key setup.</p>
             </div>
             <Table
               columns={[
@@ -125,8 +388,7 @@ export default function SkillCatalog() {
                 { key: 'env', label: 'Env Variable', render: (k: SkillApiKey) => <code className="text-xs bg-dark-bg px-1.5 py-0.5 rounded text-primary-light">{k.envVar}</code> },
                 { key: 'ssm', label: 'SSM Path', render: (k: SkillApiKey) => <span className="text-xs text-text-muted font-mono">{k.ssmPath}</span> },
                 { key: 'status', label: 'Status', render: (k: SkillApiKey) => <Badge color={k.status === 'iam-role' ? 'success' : k.status === 'active' ? 'success' : 'warning'} dot>{k.status === 'iam-role' ? 'IAM Role' : k.status === 'not-configured' ? 'Needs Config' : k.status}</Badge> },
-                { key: 'note', label: 'Note', render: (k: SkillApiKey) => <span className="text-xs text-text-muted">{(k as any).note || ''}</span> },
-                { key: 'actions', label: '', render: () => <div className="flex gap-1"><Button variant="ghost" size="sm" disabled>Rotate</Button><Button variant="ghost" size="sm" disabled>Revoke</Button></div> },
+                { key: 'note', label: 'Note', render: (k: SkillApiKey) => <span className="text-xs text-text-muted">{k.note || ''}</span> },
               ]}
               data={apiKeys}
             />
@@ -174,89 +436,9 @@ export default function SkillCatalog() {
       </Card>
 
       {/* Skill Detail Modal */}
-      <Modal open={!!selectedSkill} onClose={() => setSelectedSkill(null)} title={selectedSkill?.name || ''} size="lg">
-        {selectedSkill && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div><p className="text-xs text-text-muted">Version</p><p className="text-sm font-medium">v{selectedSkill.version}</p></div>
-              <div><p className="text-xs text-text-muted">Layer</p><Badge color={layerColor(selectedSkill.layer)}>Layer {selectedSkill.layer}</Badge></div>
-              <div><p className="text-xs text-text-muted">Category</p><Badge>{selectedSkill.category}</Badge></div>
-              <div><p className="text-xs text-text-muted">Scope</p><Badge color={selectedSkill.scope === 'global' ? 'info' : 'default'}>{selectedSkill.scope}</Badge></div>
-              <div><p className="text-xs text-text-muted">Author</p><p className="text-sm">{selectedSkill.author}</p></div>
-              <div><p className="text-xs text-text-muted">Status</p><Badge color={statusColor(selectedSkill.status || 'installed')} dot>{selectedSkill.status || 'installed'}</Badge></div>
-              {selectedSkill.bundleSizeMB && <div><p className="text-xs text-text-muted">Bundle Size</p><p className="text-sm">{selectedSkill.bundleSizeMB} MB</p></div>}
-              {selectedSkill.approvalRequired && <div><p className="text-xs text-text-muted">Approval</p><Badge color="warning">Required per use</Badge></div>}
-            </div>
-            <div><p className="text-xs text-text-muted mb-1">Description</p><p className="text-sm text-text-secondary">{selectedSkill.description}</p></div>
-            {selectedSkill.approvalNote && (
-              <div className="rounded-lg bg-warning/5 border border-warning/20 p-3 text-xs text-warning">{selectedSkill.approvalNote}</div>
-            )}
-            {selectedSkill.requires.env.length > 0 && (
-              <div>
-                <p className="text-xs text-text-muted mb-2">Required Environment Variables</p>
-                <div className="space-y-1">
-                  {selectedSkill.requires.env.map(env => {
-                    const key = apiKeys.find(k => k.skillName === selectedSkill.name && k.envVar === env);
-                    return (
-                      <div key={env} className="flex items-center justify-between rounded-lg bg-dark-bg px-3 py-2">
-                        <code className="text-xs text-primary-light">{env}</code>
-                        {key ? <Badge color="success" dot>Configured</Badge> : <Badge color="danger" dot>Missing</Badge>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            <div>
-              <p className="text-xs text-text-muted mb-2">Access Control</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-lg bg-dark-bg px-3 py-2">
-                  <p className="text-xs text-text-muted mb-1">Allowed Roles</p>
-                  <div className="flex flex-wrap gap-1">{selectedSkill.permissions.allowedRoles.map(r => <Badge key={r} color="success">{r}</Badge>)}</div>
-                </div>
-                <div className="rounded-lg bg-dark-bg px-3 py-2">
-                  <p className="text-xs text-text-muted mb-1">Blocked Roles</p>
-                  <div className="flex flex-wrap gap-1">
-                    {selectedSkill.permissions.blockedRoles.length > 0 ? selectedSkill.permissions.blockedRoles.map(r => <Badge key={r} color="danger">{r}</Badge>) : <span className="text-xs text-text-muted">None</span>}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div>
-              <p className="text-xs text-text-muted mb-2">Manifest (skill.json)</p>
-              <pre className="rounded-lg bg-dark-bg border border-dark-border p-3 text-xs text-text-secondary font-mono whitespace-pre-wrap">
-{JSON.stringify({ name: selectedSkill.name, version: selectedSkill.version, description: selectedSkill.description, layer: selectedSkill.layer, category: selectedSkill.category, requires: selectedSkill.requires, permissions: selectedSkill.permissions }, null, 2)}
-              </pre>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Install Skill Modal */}
-      <Modal open={showInstall} onClose={() => setShowInstall(false)} title="Add Skill" size="md"
-        footer={<div className="flex justify-end gap-3"><Button variant="default" onClick={() => setShowInstall(false)}>Close</Button></div>}
-      >
-        <div className="space-y-4">
-          <div className="rounded-lg bg-primary/5 border border-primary/20 p-4">
-            <p className="text-sm font-medium text-text-primary mb-2">Skill Installation Methods</p>
-            <div className="space-y-3 text-sm text-text-secondary">
-              <div>
-                <p className="font-medium text-text-primary">Layer 1 — Docker Built-in</p>
-                <p className="text-xs text-text-muted">Pre-installed in Docker image. Requires image rebuild via <code className="bg-dark-bg px-1 rounded">build-on-ec2.sh</code>. Currently: 13 skills.</p>
-              </div>
-              <div>
-                <p className="font-medium text-text-primary">Layer 2 — S3 Hot-Load</p>
-                <p className="text-xs text-text-muted">Upload skill.json + tool.js to <code className="bg-dark-bg px-1 rounded">s3://_shared/skills/skill-name/</code>. Loaded at microVM startup. No npm deps.</p>
-              </div>
-              <div>
-                <p className="font-medium text-text-primary">Layer 3 — Pre-built Bundle</p>
-                <p className="text-xs text-text-muted">For skills with npm dependencies. Requires CodeBuild pipeline (see Roadmap). Upload tar.gz to S3 skill-bundles/.</p>
-              </div>
-            </div>
-          </div>
-          <p className="text-xs text-text-muted">Current skills are managed via seed scripts and S3 upload. Self-service skill installation UI is planned for v1.1.</p>
-        </div>
-      </Modal>
+      {selectedSkill && (
+        <SkillDetailModal skill={selectedSkill} apiKeys={apiKeys} onClose={() => setSelectedSkill(null)} />
+      )}
     </div>
   );
 }

@@ -35,9 +35,13 @@
   "gateway": {
     "port": 18789,
     "mode": "local",
-    "bind": "loopback",
+    "bind": "lan",
     "auth": {
       "mode": "none"
+    },
+    "controlUi": {
+      "allowedOrigins": ["*"],
+      "allowInsecureAuth": true
     }
   },
   "plugins": {

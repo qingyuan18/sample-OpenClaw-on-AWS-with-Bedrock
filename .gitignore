@@ -24,3 +24,7 @@ enterprise/blog/
 
 # Brand assets (local only)
 enterprise/catnip-mascot/
+enterprise/.env
+enterprise/.env.*
+!enterprise/.env.example
+.claude/

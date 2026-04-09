@@ -21,10 +21,14 @@ export ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(aws ssm get-parameter --name /opencla
 export JWT_SECRET="${JWT_SECRET:-$(aws ssm get-parameter --name /openclaw/${STACK_NAME}/jwt-secret --with-decryption --query Parameter.Value --output text --region ${SSM_REGION} 2>/dev/null || echo '')}"
 
 # Defaults
-export AWS_REGION="${AWS_REGION:-us-east-2}"
+export AWS_REGION="${AWS_REGION:-us-east-1}"
 export GATEWAY_REGION="${GATEWAY_REGION:-${SSM_REGION}}"
 export CONSOLE_PORT="${CONSOLE_PORT:-8099}"
 export TENANT_ROUTER_URL="${TENANT_ROUTER_URL:-http://localhost:8090}"
+
+# DynamoDB config — table name MUST equal STACK_NAME (IAM policy scoped to table/${StackName})
+export DYNAMODB_TABLE="${DYNAMODB_TABLE:-${STACK_NAME}}"
+export DYNAMODB_REGION="${DYNAMODB_REGION:-${AWS_REGION}}"
 
 cd /opt/admin-console/server
 exec /opt/admin-venv/bin/python main.py

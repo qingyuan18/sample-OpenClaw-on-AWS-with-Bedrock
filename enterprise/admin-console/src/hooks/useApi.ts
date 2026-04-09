@@ -485,6 +485,7 @@ export interface SkillManifest {
 export interface SkillApiKey {
   id: string; skillName: string; envVar: string; ssmPath: string;
   status: string; lastRotated: string; createdBy: string;
+  awsService?: string; note?: string;
 }
 
 export function useSkills() {
@@ -498,6 +499,32 @@ export function useSkillKeys() {
   return useQuery<SkillApiKey[]>({
     queryKey: ['skill-keys'],
     queryFn: () => api.get('/skills/keys/all'),
+  });
+}
+
+export function useAssignSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ skillName, positionId }: { skillName: string; positionId: string }) =>
+      api.post<{ assigned: boolean; agentsPropagated: number }>(`/skills/${skillName}/assign`, { positionId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['skills'] });
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['agents'] });
+    },
+  });
+}
+
+export function useUnassignSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ skillName, positionId }: { skillName: string; positionId: string }) =>
+      api.del<{ unassigned: boolean }>(`/skills/${skillName}/assign?positionId=${positionId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['skills'] });
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['agents'] });
+    },
   });
 }
 

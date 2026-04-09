@@ -13,7 +13,7 @@ import boto3
 from boto3.dynamodb.conditions import Key, Attr
 from botocore.exceptions import ClientError
 
-TABLE_NAME = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
+TABLE_NAME = os.environ.get("DYNAMODB_TABLE") or os.environ.get("STACK_NAME", "openclaw-enterprise")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-2")
 ORG_PK = "ORG#acme"
 
@@ -90,6 +90,9 @@ def get_departments() -> list[dict]:
 def get_positions() -> list[dict]:
     return _query("POS#")
 
+def get_position(pos_id: str) -> Optional[dict]:
+    return _get_item(f"POS#{pos_id}")
+
 def get_employees() -> list[dict]:
     return _query("EMP#")
 
@@ -144,6 +147,15 @@ def get_agent(agent_id: str) -> Optional[dict]:
             item["qualityScore"] = float(item["qualityScore"])
         except ValueError:
             item["qualityScore"] = None
+    return item
+
+def update_agent(agent_id: str, updates: dict) -> Optional[dict]:
+    item = _get_item(f"AGENT#{agent_id}")
+    if not item:
+        return None
+    item.update(updates)
+    item["id"] = agent_id
+    _put_item(f"AGENT#{agent_id}", item, "TYPE#agent", f"AGENT#{agent_id}")
     return item
 
 def get_bindings() -> list[dict]:

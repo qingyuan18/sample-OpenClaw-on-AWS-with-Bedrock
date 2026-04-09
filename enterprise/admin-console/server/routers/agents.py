@@ -518,3 +518,76 @@ def get_all_skill_keys():
             })
 
     return keys
+
+
+# ── Skill assignment ─────────────────────────────────────────────────────
+
+@router.post("/api/v1/skills/{skill_name}/assign")
+def assign_skill_to_position(skill_name: str, body: dict, authorization: str = Header(default="")):
+    """Assign a skill to a position. Propagates to all agents in that position."""
+    require_role(authorization, roles=["admin"])
+    position_id = body.get("positionId", "")
+    if not position_id:
+        raise HTTPException(400, "positionId required")
+
+    # Verify skill exists in S3
+    manifest_content = s3ops.read_file(f"_shared/skills/{skill_name}/skill.json")
+    if not manifest_content:
+        raise HTTPException(404, f"Skill {skill_name} not found in S3")
+
+    # Update position's defaultSkills
+    pos = db.get_position(position_id)
+    if not pos:
+        raise HTTPException(404, f"Position {position_id} not found")
+
+    skills = pos.get("defaultSkills", [])
+    if skill_name not in skills:
+        skills.append(skill_name)
+        db.update_position(position_id, {"defaultSkills": skills})
+
+    # Propagate to agents: add skill to each agent in this position
+    agents_updated = []
+    for emp in db.get_employees():
+        if emp.get("positionId") == position_id and emp.get("agentId"):
+            agent = db.get_agent(emp["agentId"])
+            if agent:
+                agent_skills = agent.get("skills", [])
+                if skill_name not in agent_skills:
+                    agent_skills.append(skill_name)
+                    db.update_agent(emp["agentId"], {"skills": agent_skills})
+                    agents_updated.append(emp["agentId"])
+
+    return {"assigned": True, "positionId": position_id, "skill": skill_name,
+            "agentsPropagated": len(agents_updated)}
+
+
+@router.delete("/api/v1/skills/{skill_name}/assign")
+def unassign_skill_from_position(skill_name: str, positionId: str = "", authorization: str = Header(default="")):
+    """Remove a skill from a position and its agents."""
+    require_role(authorization, roles=["admin"])
+    if not positionId:
+        raise HTTPException(400, "positionId query param required")
+
+    pos = db.get_position(positionId)
+    if not pos:
+        raise HTTPException(404, f"Position {positionId} not found")
+
+    skills = pos.get("defaultSkills", [])
+    if skill_name in skills:
+        skills.remove(skill_name)
+        db.update_position(positionId, {"defaultSkills": skills})
+
+    # Remove from agents
+    agents_updated = []
+    for emp in db.get_employees():
+        if emp.get("positionId") == positionId and emp.get("agentId"):
+            agent = db.get_agent(emp["agentId"])
+            if agent:
+                agent_skills = agent.get("skills", [])
+                if skill_name in agent_skills:
+                    agent_skills.remove(skill_name)
+                    db.update_agent(emp["agentId"], {"skills": agent_skills})
+                    agents_updated.append(emp["agentId"])
+
+    return {"unassigned": True, "positionId": positionId, "skill": skill_name,
+            "agentsPropagated": len(agents_updated)}

@@ -1089,8 +1089,77 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/ping":
             self._respond(200, {"status": "Healthy", "time_of_last_update": int(time.time())})
+        elif self.path == "/gateway-dashboard":
+            self._handle_gateway_dashboard()
+        elif self.path == "/gateway-approve-pairing":
+            self._handle_gateway_approve_pairing()
         else:
             self._respond(404, {"error": "not found"})
+
+    def _handle_gateway_dashboard(self):
+        """Run `openclaw dashboard --no-open` and return the dashboard URL.
+        This generates a fresh pairing token each time, so the caller can
+        open the Gateway Console without needing prior pairing setup."""
+        try:
+            env = os.environ.copy()
+            env["HOME"] = os.environ.get("HOME", "/root")
+            env["PATH"] = "/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
+            result = subprocess.run(
+                [OPENCLAW_BIN, "dashboard", "--no-open"],
+                capture_output=True, text=True, timeout=45, env=env,
+            )
+            output = result.stdout + result.stderr
+            # Extract URL: "Dashboard URL: http://127.0.0.1:18789/#token=abc123..."
+            url_match = re.search(r'(https?://\S+#token=\S+)', output)
+            if url_match:
+                url = url_match.group(1)
+                # Extract components
+                gw_token = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")
+                dash_token_match = re.search(r'#token=([a-f0-9]+)', url)
+                dash_token = dash_token_match.group(1) if dash_token_match else ""
+                self._respond(200, {
+                    "url": url,
+                    "gatewayToken": gw_token,
+                    "dashboardToken": dash_token,
+                    "port": 18789,
+                })
+            else:
+                logger.warning("gateway-dashboard: no URL in output: %s", output[-200:])
+                self._respond(500, {"error": "Gateway dashboard URL not found", "output": output[-300:]})
+        except subprocess.TimeoutExpired:
+            self._respond(504, {"error": "Gateway dashboard timed out"})
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
+
+    def _handle_gateway_approve_pairing(self):
+        """Auto-approve the most recent pending device pairing request.
+        Called by the admin console after the browser opens the Gateway Console
+        and creates a pending pairing request."""
+        try:
+            env = os.environ.copy()
+            env["HOME"] = os.environ.get("HOME", "/root")
+            env["PATH"] = "/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
+            gw_token = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")
+            cmd = [OPENCLAW_BIN, "devices", "approve", "--latest", "--json"]
+            if gw_token:
+                cmd.extend(["--token", gw_token])
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=15, env=env,
+            )
+            output = result.stdout + result.stderr
+            logger.info("gateway-approve-pairing: exit=%d output=%s", result.returncode, output[:300])
+            if result.returncode == 0:
+                try:
+                    data = json.loads(result.stdout)
+                except (json.JSONDecodeError, ValueError):
+                    data = {"raw": output[:300]}
+                self._respond(200, {"approved": True, "detail": data})
+            else:
+                self._respond(200, {"approved": False, "reason": output[:300]})
+        except subprocess.TimeoutExpired:
+            self._respond(504, {"error": "Approve pairing timed out"})
+        except Exception as e:
+            self._respond(500, {"error": str(e)})
 
     def do_POST(self):
         if self.path != "/invocations":

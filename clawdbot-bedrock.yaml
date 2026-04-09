@@ -526,11 +526,7 @@ Resources:
                   "plugins": {
                     "entries": {
                       "amazon-bedrock": {
-                        "config": {
-                          "discovery": {
-                            "enabled": true
-                          }
-                        }
+                        "enabled": true
                       }
                     }
                   },
@@ -785,7 +781,7 @@ Resources:
                   } >> /home/ubuntu/.bashrc
 
                   sudo -u ubuntu mkdir -p /home/ubuntu/.config/environment.d
-                  sudo -u ubuntu bash -c "{ echo AWS_REGION=$AWS_REGION; echo AWS_DEFAULT_REGION=$AWS_REGION; } > /home/ubuntu/.config/environment.d/aws.conf"
+                  sudo -u ubuntu bash -c "{ echo AWS_REGION=$AWS_REGION; echo AWS_DEFAULT_REGION=$AWS_REGION; echo AWS_PROFILE=default; } > /home/ubuntu/.config/environment.d/aws.conf"
 
                   loginctl enable-linger ubuntu
                   systemctl start user@1000.service
@@ -793,6 +789,11 @@ Resources:
                   # Configure OpenClaw
                   echo "[8/9] Configuring OpenClaw..."
                   sudo -u ubuntu mkdir -p /home/ubuntu/.openclaw
+
+                  # Write .env for Bedrock IAM auth — survives gateway install/reinstall
+                  # OpenClaw 2026.4.5+ uses pi-coding-agent which needs AWS_PROFILE
+                  # to discover IAM credentials from EC2 instance profile (IMDS)
+                  sudo -u ubuntu bash -c "printf 'AWS_PROFILE=default\nAWS_REGION=$AWS_REGION\nAWS_DEFAULT_REGION=$AWS_REGION\n' > /home/ubuntu/.openclaw/.env"
 
                   GATEWAY_TOKEN=$(openssl rand -hex 24)
 
@@ -893,15 +894,17 @@ Resources:
                   echo "SUCCESS" > /home/ubuntu/.openclaw/setup_status.txt
                   echo "Setup completed: $(date)" >> /home/ubuntu/.openclaw/setup_status.txt
 
-                  COMPLETE_MSG="OpenClaw ready. Run: aws ssm get-parameter --name /openclaw/$STACK_NAME/gateway-token --with-decryption --query Parameter.Value --output text --region $AWS_REGION"
+                  # Read token back from SSM for cfn-signal (so CloudFormation Outputs can build the access URL)
+                  CFN_TOKEN=$(aws ssm get-parameter --name "/openclaw/$STACK_NAME/gateway-token" --with-decryption --query Parameter.Value --output text --region $AWS_REGION 2>/dev/null || echo "TOKEN_UNAVAILABLE")
 
                   CFN_SIGNAL=$(which cfn-signal 2>/dev/null || find /usr -name cfn-signal 2>/dev/null | head -1)
                   if [ -n "$CFN_SIGNAL" ]; then
-                    $CFN_SIGNAL -e 0 -d "$COMPLETE_MSG" -r "OpenClaw ready" '${OpenClawWaitHandle}'
+                    $CFN_SIGNAL -e 0 -d "$CFN_TOKEN" -r "OpenClaw ready" '${OpenClawWaitHandle}'
                   else
-                    SIGNAL_JSON="{\"Status\":\"SUCCESS\",\"Reason\":\"OpenClaw ready\",\"UniqueId\":\"openclaw\",\"Data\":\"$COMPLETE_MSG\"}"
+                    SIGNAL_JSON="{\"Status\":\"SUCCESS\",\"Reason\":\"OpenClaw ready\",\"UniqueId\":\"openclaw\",\"Data\":\"$CFN_TOKEN\"}"
                     curl -X PUT -H "Content-Type:" --data-binary "$SIGNAL_JSON" "${OpenClawWaitHandle}"
                   fi
+                  unset CFN_TOKEN
 
                   echo "=========================================="
                   echo "OpenClaw installation complete!"
@@ -961,7 +964,7 @@ Resources:
 
 Outputs:
   Step1InstallSSMPlugin:
-    Description: "STEP 1: Install SSM Session Manager Plugin on your local computer"
+    Description: "STEP 1: Install SSM Session Manager Plugin on your local computer (Option 2: go to EC2 Console > right-click instance > Connect > Session Manager to get a shell, then run 'sudo su - ubuntu && openclaw gateway status' to set up IM channels)"
     Value: "https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html"
 
   Step2PortForwarding:
@@ -969,10 +972,11 @@ Outputs:
     Value: !Sub |
       aws ssm start-session --target ${OpenClawInstance} --region ${AWS::Region} --document-name AWS-StartPortForwardingSession --parameters '{"portNumber":["18789"],"localPortNumber":["18789"]}'
 
-  Step3GetToken:
-    Description: "STEP 3: Get your access token"
-    Value: !Sub |
-      aws ssm get-parameter --name /openclaw/${AWS::StackName}/gateway-token --with-decryption --query Parameter.Value --output text --region ${AWS::Region}
+  Step3AccessURL:
+    Description: "STEP 3: Open this URL in browser"
+    Value: !Sub
+      - "http://localhost:18789/?token=${Token}"
+      - Token: !Select [3, !Split ['"', !GetAtt OpenClawWaitCondition.Data]]
 
   Step4StartChatting:
     Description: "STEP 4: Start using OpenClaw!"
