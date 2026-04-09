@@ -144,7 +144,7 @@ function ChannelWizard({ channel, onDone, onCancel }: { channel: Channel; onDone
       {session.deepLink && channel.id === 'feishu' ? (
         <div className="space-y-3">
           <ol className="space-y-1.5 text-xs text-text-secondary">
-            <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">1</span><span>Scan the QR code below with <strong className="text-text-primary">Feishu</strong> to open ACME Agent directly</span></li>
+            <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">1</span><span>Scan the QR code below with <strong className="text-text-primary">Feishu</strong> to open OpenClaw Agent directly</span></li>
             <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">2</span><span>The bot chat opens automatically</span></li>
             <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">3</span><span>Copy the code below and <strong className="text-text-primary">paste + send it</strong> in the chat</span></li>
           </ol>
@@ -162,7 +162,7 @@ function ChannelWizard({ channel, onDone, onCancel }: { channel: Channel; onDone
           </div>
           <a href={session.deepLink} target="_blank" rel="noopener noreferrer">
             <Button variant="default" className="w-full">
-              <ExternalLink size={14} /> Open ACME Agent in Feishu
+              <ExternalLink size={14} /> Open OpenClaw Agent in Feishu
             </Button>
           </a>
           {/* Token to send after opening */}
@@ -206,12 +206,12 @@ function ChannelWizard({ channel, onDone, onCancel }: { channel: Channel; onDone
             {channel.id === 'discord' && (
               <ol className="space-y-2 text-xs text-text-secondary">
                 <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">1</span><span>Open <strong className="text-text-primary">Discord</strong> and go to the ACME Corp server</span></li>
-                <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">2</span><span>Find <strong className="text-text-primary">ACME Agent</strong> in the Members list and open a DM</span></li>
+                <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">2</span><span>Find <strong className="text-text-primary">OpenClaw Agent</strong> in the Members list and open a DM</span></li>
                 <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/20 text-primary text-[10px] font-bold flex items-center justify-center">3</span><span><strong className="text-text-primary">Send this command</strong> in the DM:</span></li>
               </ol>
             )}
             {!['feishu','discord'].includes(channel.id) && (
-              <p className="text-xs text-text-muted">Open {channel.label}, find <strong className="text-text-primary">@{session.botUsername || 'ACME Agent'}</strong>, and send:</p>
+              <p className="text-xs text-text-muted">Open {channel.label}, find <strong className="text-text-primary">@{session.botUsername || 'OpenClaw Agent'}</strong>, and send:</p>
             )}
             <div className="flex items-center gap-2 mt-2">
               <code className="flex-1 text-sm font-mono text-primary-light bg-primary/10 px-3 py-2.5 rounded-lg block text-center">

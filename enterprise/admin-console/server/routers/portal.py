@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 import db
 import s3ops
-from shared import require_auth, require_role, ssm_client, GATEWAY_REGION, STACK_NAME, GATEWAY_ACCOUNT_ID, GATEWAY_INSTANCE_ID
+from shared import require_auth, require_role, ssm_client, GATEWAY_REGION, STACK_NAME, GATEWAY_ACCOUNT_ID, GATEWAY_INSTANCE_ID, get_openclaw_bin, get_openclaw_env_path
 from routers.bindings import _mapping_prefix, _write_user_mapping
 from routers.agents import get_skills
 
@@ -91,12 +91,10 @@ class PortalRequestCreate(BaseModel):
 def _run_openclaw_channels() -> list:
     """Get live channel status from openclaw channels list CLI."""
     import subprocess as _sp
-    openclaw_bin = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin/openclaw"
-    env_path = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin:/usr/local/bin:/usr/bin:/bin"
     try:
         result = _sp.run(
-            ["sudo", "-u", "ubuntu", "env", f"PATH={env_path}", "HOME=/home/ubuntu",
-             openclaw_bin, "channels", "list", "--json"],
+            ["sudo", "-u", "ubuntu", "env", f"PATH={get_openclaw_env_path()}", "HOME=/home/ubuntu",
+             get_openclaw_bin(), "channels", "list", "--json"],
             capture_output=True, text=True, timeout=10,
         )
         if result.stdout:

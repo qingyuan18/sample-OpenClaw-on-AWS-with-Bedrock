@@ -19,6 +19,7 @@ import db
 from shared import (
     require_auth, require_role, get_dept_scope,
     ssm_client, GATEWAY_REGION, STACK_NAME, GATEWAY_ACCOUNT_ID,
+    get_openclaw_bin, get_openclaw_env_path,
 )
 from routers.org import _auto_provision_employee
 
@@ -297,14 +298,13 @@ def approve_pairing(body: PairingApproveRequest, authorization: str = Header(def
     require_role(authorization, roles=["admin"])
 
     # 1. Run openclaw pairing approve
-    openclaw_bin = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin/openclaw"
     env = os.environ.copy()
-    env["PATH"] = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin:" + env.get("PATH", "")
+    env["PATH"] = get_openclaw_env_path()
     env["HOME"] = "/home/ubuntu"
 
     try:
         result = subprocess.run(
-            [openclaw_bin, "pairing", "approve", body.channel, body.pairingCode],
+            [get_openclaw_bin(), "pairing", "approve", body.channel, body.pairingCode],
             capture_output=True, text=True, timeout=15, env=env,
         )
         if result.returncode != 0:

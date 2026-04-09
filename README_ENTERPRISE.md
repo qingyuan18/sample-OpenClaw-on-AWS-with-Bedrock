@@ -454,6 +454,11 @@ Zero IT friction. Employees self-service in 30 seconds. Admins see all connectio
 3. **Docker build takes 10–15 min** — `clawhub install` installs skills one by one. This is normal.
 4. **After `update-agent-runtime`**, poll until `status: READY` before testing.
 5. **DynamoDB is in `us-east-2` by default** (AgentCore is `us-east-1`). This is intentional — DynamoDB cross-region access is free and `us-east-2` avoids hitting AgentCore's region during heavy load.
+6. **`deploy.sh` does NOT deploy Admin Console or Gateway services.** After `deploy.sh` completes, you must manually follow Steps 4–7 to deploy the Admin Console, create `/etc/openclaw/env`, store SSM secrets, and start Gateway services.
+7. **`/etc/openclaw/env` must set `AWS_REGION` to the DynamoDB region (`us-east-2`)**, not the EC2 region (`us-east-1`). The Admin Console's `db.py` uses `AWS_REGION` to locate DynamoDB. Use `GATEWAY_REGION` for EC2/SSM/AgentCore operations.
+8. **`deploy.sh` tar packaging is missing `enterprise/auth-agent`** — the Dockerfile `COPY auth-agent/` will fail. Fix: add `enterprise/auth-agent` to the tar command and change docker build context from `.` to `enterprise` (see Troubleshooting).
+9. **Feishu plugin is disabled by default** — run `openclaw plugins enable feishu` and configure with channel ID `feishu` (not `openclaw-feishu`). The community npm package `openclaw-feishu` is NOT compatible with `openclaw-agentcore`'s plugin system.
+10. **NVM on EC2** — `npm`/`node` are installed via NVM under the `ubuntu` user. SSM RunShellScript runs as root and cannot find them. Always prefix with: `export NVM_DIR=/home/ubuntu/.nvm && source $NVM_DIR/nvm.sh`
 
 **Verify it works** (after deployment):
 - Playground → Carol Zhang (Finance) → "run git status" → refused ✓
@@ -1102,6 +1107,107 @@ aws logs tail /aws/bedrock-agentcore/runtimes/<runtime-id>-DEFAULT --follow
 ```
 
 **Fix:** Rebuild the Docker image. Both `agent-container/Dockerfile` and `exec-agent/Dockerfile` must install `openclaw@2026.3.24` exactly — do not upgrade.
+
+### Docker build fails: `auth-agent/__init__.py not found`
+
+**Symptom:** `deploy.sh` Docker build step fails with:
+```
+COPY auth-agent/__init__.py /app/auth-agent/__init__.py
+ERROR: failed to compute cache key: "/auth-agent/__init__.py": not found
+```
+
+**Cause:** Two bugs in `deploy.sh`:
+1. The tar packaging step does not include `enterprise/auth-agent` — only `enterprise/agent-container` and `enterprise/exec-agent` are packaged.
+2. The `docker build` context points to `.` (the tar root) instead of `enterprise/` — but the Dockerfile's `COPY` paths assume the context is `enterprise/`.
+
+**Fix:** Apply both changes to `deploy.sh`:
+
+```bash
+# 1. Add enterprise/auth-agent to the tar packaging (around line 207)
+COPYFILE_DISABLE=1 tar czf "$TARBALL" \
+  -C "$SCRIPT_DIR/.." \
+  enterprise/agent-container \
+  enterprise/auth-agent \        # ← ADD THIS LINE
+  enterprise/exec-agent
+
+# 2. Change docker build context from "." to "enterprise" (around line 237)
+docker build -f enterprise/agent-container/Dockerfile -t ${ECR_URI}:latest enterprise
+#                                                                          ^^^^^^^^^^
+#                                                              was "." — must be "enterprise"
+```
+
+### Admin Console returns "Employee not found" on login
+
+**Symptom:** Admin Console is running on port 8099, but login with `emp-jiade` returns "Employee not found".
+
+**Cause:** Two possible issues:
+
+**Issue A — DynamoDB not seeded:** `deploy.sh` may have been interrupted before the seed step completed. Check:
+```bash
+aws dynamodb scan --table-name $STACK_NAME --region us-east-2 \
+  --select COUNT --query 'Count'
+# Should return ~77+ items. If 0, re-run seed scripts.
+```
+
+**Issue B — Wrong `AWS_REGION` in `/etc/openclaw/env`:** The Admin Console's `db.py` uses `AWS_REGION` to connect to DynamoDB (default: `us-east-2`). If `/etc/openclaw/env` sets `AWS_REGION=us-east-1` (the EC2/AgentCore region), the console will look for the DynamoDB table in the wrong region.
+
+**Fix:** Ensure `/etc/openclaw/env` sets `AWS_REGION` to the DynamoDB region:
+```bash
+# /etc/openclaw/env — AWS_REGION must point to DynamoDB region, not EC2 region
+STACK_NAME=openclaw-enterprise
+AWS_REGION=us-east-2              # ← DynamoDB region, NOT us-east-1
+GATEWAY_REGION=us-east-1          # ← EC2/AgentCore/SSM region
+SSM_REGION=us-east-1
+DYNAMODB_TABLE=openclaw-enterprise
+DYNAMODB_REGION=us-east-2
+GATEWAY_INSTANCE_ID=i-xxxxxxxxx
+```
+Then restart: `systemctl restart openclaw-admin`
+
+> **Root cause:** `deploy.sh` Step 7 does not create `/etc/openclaw/env`. The `start.sh` script defaults `STACK_NAME` to `openclaw-multitenancy` when this file is missing, causing SSM parameter lookups to fail silently.
+
+### Admin Console port 8099 not listening (SSM port-forward fails)
+
+**Symptom:** `Connection to destination port failed` when SSM port-forwarding to 8099.
+
+**Cause:** `deploy.sh` only deploys infrastructure (CloudFormation + Docker + AgentCore + DynamoDB seed). The Admin Console, Gateway services, and `/etc/openclaw/env` must be deployed separately via Steps 4–7 in this document.
+
+**Fix:** Follow Steps 4–7 after `deploy.sh` completes. At minimum:
+1. Create `/etc/openclaw/env` with correct variables
+2. Deploy Admin Console (Step 4)
+3. Store secrets in SSM (admin-password, jwt-secret)
+4. Deploy Gateway services (Step 5)
+
+### Feishu/Lark channel not visible in Gateway UI
+
+**Symptom:** Gateway UI shows Telegram, WhatsApp, Discord but no Feishu option.
+
+**Cause:** The built-in Feishu plugin (`@openclaw/feishu`) is **disabled** by default. It must be explicitly enabled.
+
+**Fix:**
+```bash
+# SSH into EC2 via SSM, then as ubuntu user:
+export NVM_DIR=/home/ubuntu/.nvm && source $NVM_DIR/nvm.sh
+
+# Enable the built-in feishu plugin
+openclaw plugins enable feishu
+
+# Configure credentials (use channel ID "feishu", not "openclaw-feishu")
+openclaw config set channels.feishu.appId <YOUR_APP_ID>
+openclaw config set channels.feishu.appSecret <YOUR_APP_SECRET>
+
+# Restart gateway
+kill $(pgrep -f openclaw-gatewa)
+cd /home/ubuntu && nohup openclaw gateway start > /tmp/gateway.log 2>&1 &
+
+# Verify
+openclaw status
+# Should show: Feishu │ ON │ OK │ configured
+```
+
+> **Note:** The community npm package `openclaw-feishu` is a separate plugin and is NOT recognized by `openclaw-agentcore`'s plugin system. Use the built-in `feishu` extension instead. The channel ID for config is `feishu` (not `openclaw-feishu`).
+
+> **Note:** On the EC2 gateway instance, `npm` and `node` are installed via NVM under the `ubuntu` user. Commands run as root (including SSM RunShellScript) must source NVM first: `export NVM_DIR=/home/ubuntu/.nvm && source $NVM_DIR/nvm.sh`
 
 ---
 

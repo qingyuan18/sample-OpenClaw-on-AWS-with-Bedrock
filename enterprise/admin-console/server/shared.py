@@ -135,3 +135,18 @@ def get_dept_scope(user) -> Optional[set]:
                 ids.add(d["id"])
                 queue.append(d["id"])
     return ids
+
+
+# --- OpenClaw binary path (auto-detect Node.js version) ---
+
+def get_openclaw_bin() -> str:
+    """Find openclaw binary regardless of NVM Node.js version."""
+    import glob
+    matches = glob.glob("/home/ubuntu/.nvm/versions/node/*/bin/openclaw")
+    return matches[-1] if matches else "/usr/local/bin/openclaw"
+
+
+def get_openclaw_env_path() -> str:
+    """Return PATH string containing the Node.js bin dir for openclaw."""
+    from pathlib import Path
+    return f"{Path(get_openclaw_bin()).parent}:/usr/local/bin:/usr/bin:/bin"

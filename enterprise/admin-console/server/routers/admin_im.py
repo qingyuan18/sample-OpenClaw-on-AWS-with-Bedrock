@@ -16,7 +16,7 @@ import boto3
 from fastapi import APIRouter, HTTPException, Header
 
 import db
-from shared import require_role, ssm_client, GATEWAY_REGION, STACK_NAME
+from shared import require_role, ssm_client, GATEWAY_REGION, STACK_NAME, get_openclaw_bin, get_openclaw_env_path
 
 router = APIRouter(tags=["admin-im"])
 
@@ -30,12 +30,10 @@ def _mapping_prefix():
 def _run_openclaw_channels() -> list:
     """Get live channel status from openclaw channels list CLI."""
     import subprocess as _sp
-    openclaw_bin = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin/openclaw"
-    env_path = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin:/usr/local/bin:/usr/bin:/bin"
     try:
         result = _sp.run(
-            ["sudo", "-u", "ubuntu", "env", f"PATH={env_path}", "HOME=/home/ubuntu",
-             openclaw_bin, "channels", "list", "--json"],
+            ["sudo", "-u", "ubuntu", "env", f"PATH={get_openclaw_env_path()}", "HOME=/home/ubuntu",
+             get_openclaw_bin(), "channels", "list", "--json"],
             capture_output=True, text=True, timeout=10,
         )
         if result.stdout:
@@ -259,11 +257,9 @@ def test_im_channel(channel: str, authorization: str = Header(default="")):
     require_role(authorization, roles=["admin"])
     try:
         import subprocess as _sp
-        openclaw_bin = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin/openclaw"
-        env_path = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin:/usr/local/bin:/usr/bin:/bin"
         result = _sp.run(
-            ["sudo", "-u", "ubuntu", "env", f"PATH={env_path}", "HOME=/home/ubuntu",
-             openclaw_bin, "channels", "list", "--json"],
+            ["sudo", "-u", "ubuntu", "env", f"PATH={get_openclaw_env_path()}", "HOME=/home/ubuntu",
+             get_openclaw_bin(), "channels", "list", "--json"],
             capture_output=True, text=True, timeout=10,
         )
         if result.stdout:

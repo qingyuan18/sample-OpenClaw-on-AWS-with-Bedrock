@@ -11,7 +11,7 @@ from fastapi import APIRouter, Header
 from pydantic import BaseModel
 
 import db
-from shared import require_role
+from shared import require_role, get_openclaw_bin, get_openclaw_env_path
 
 router = APIRouter(tags=["playground"])
 
@@ -90,15 +90,12 @@ def _admin_assistant_direct(message: str) -> dict:
                "planA": "Full IT Admin access (read-only safety)",
                "planE": "Block credential exposure"}
 
-    openclaw_bin = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin/openclaw"
-    env_path = "/home/ubuntu/.nvm/versions/node/v22.22.1/bin:/usr/local/bin:/usr/bin:/bin"
-
     try:
         import time as _admin_t
         session_id = f"admin-assistant"  # Stable session for conversation continuity
 
-        cmd = ["sudo", "-u", "ubuntu", "env", f"PATH={env_path}", "HOME=/home/ubuntu",
-               openclaw_bin, "agent", "--session-id", session_id,
+        cmd = ["sudo", "-u", "ubuntu", "env", f"PATH={get_openclaw_env_path()}", "HOME=/home/ubuntu",
+               get_openclaw_bin(), "agent", "--session-id", session_id,
                "--message", message, "--json", "--timeout", "120"]
         result = _sp.run(cmd, capture_output=True, text=True, timeout=130)
 
