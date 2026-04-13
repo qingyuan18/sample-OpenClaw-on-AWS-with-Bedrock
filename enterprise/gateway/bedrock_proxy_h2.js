@@ -166,11 +166,35 @@ async function fastPathBedrock(userText) {
     });
     const resp = await client.send(cmd);
     const text = resp.output?.message?.content?.[0]?.text || 'No response';
-    return text;
+    const usage = resp.usage || {};
+    return { text, inputTokens: usage.inputTokens || 0, outputTokens: usage.outputTokens || 0 };
   } catch (e) {
     log(`Fast-path Bedrock error: ${e.message}`);
     return null;
   }
+}
+
+/**
+ * Fire-and-forget: report fast-path usage to admin console so it appears
+ * in the Usage & Cost dashboard.  Called whenever fast-path serves a response
+ * that bypasses the Agent Container (which normally writes usage to DynamoDB).
+ */
+function reportFastPathUsage(channel, userId, inputTokens, outputTokens) {
+  const payload = JSON.stringify({
+    channel, userId, model: BEDROCK_MODEL_ID,
+    inputTokens, outputTokens,
+  });
+  const req = http.request({
+    hostname: '127.0.0.1', port: 8099,
+    path: '/api/v1/internal/fast-path-usage',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+    timeout: 5000,
+  });
+  req.on('error', e => log(`Fast-path usage report failed: ${e.message}`));
+  req.on('timeout', () => req.destroy());
+  req.write(payload);
+  req.end();
 }
 
 // =============================================================================
@@ -246,6 +270,38 @@ function extractUserMessage(body) {
       if (chanMatch) channel = chanMatch[1].toLowerCase();
     }
   } catch (e) { /* fall through */ }
+
+  // Priority 0.5: Extract from OpenClaw's [from: name (userId)] tag in user message
+  // Format: [from: <name_or_unknown> (<platform_user_id>)]
+  // The first field may be a username (Discord: "temploer") or "unknown" (Feishu).
+  // We always detect channel from userId format or message context, not from this field.
+  if (userId === 'unknown') {
+    const fromTag = userText.match(/\[from:\s*(\S+)\s+\(([^)]+)\)\]/);
+    if (fromTag) {
+      const tagUserId = fromTag[2];
+      userId = tagUserId;
+      // Detect channel from userId format
+      if (/^ou_[a-zA-Z0-9]+$/.test(tagUserId)) {
+        channel = 'feishu';
+      } else if (/^\d{17,19}$/.test(tagUserId)) {
+        channel = 'discord';
+      } else if (/^\d{7,12}$/.test(tagUserId)) {
+        channel = 'telegram';
+      } else if (/^\+\d{7,15}$/.test(tagUserId)) {
+        channel = 'whatsapp';
+      }
+      // Also check message context for channel hints
+      if (channel === 'unknown') {
+        if (userText.includes('Discord Guild') || userText.includes('Discord DM')) channel = 'discord';
+        else if (userText.includes('Telegram')) channel = 'telegram';
+        else if (userText.includes('Slack')) channel = 'slack';
+        else if (userText.includes('WhatsApp')) channel = 'whatsapp';
+      }
+    }
+  }
+
+  // Strip [from: ...] and [message_id: ...] tags from user text before forwarding
+  userText = userText.replace(/\[from:\s*[^\]]*\]\s*/g, '').replace(/\[message_id:\s*[^\]]*\]\s*/g, '').trim();
 
   // Priority 1: extract from user message text (original regex)
   const slackDm = userText.match(/Slack DM from ([\w]+):/i);
@@ -414,8 +470,11 @@ async function routeRequest(channel, userId, userText) {
     }
     // Timeout: fall through to fast-path
     log(`Warming timeout for ${tenantKey}, using fast-path`);
-    const fastText = await fastPathBedrock(userText);
-    if (fastText) return fastText;
+    const fastResult = await fastPathBedrock(userText);
+    if (fastResult) {
+      reportFastPathUsage(channel, userId, fastResult.inputTokens, fastResult.outputTokens);
+      return fastResult.text;
+    }
     // Fast-path also failed: wait for full pipeline
     const fullText = await forwardToTenantRouter(channel, userId, userText);
     setTenantStatus(tenantKey, 'warm');
@@ -430,10 +489,11 @@ async function routeRequest(channel, userId, userText) {
   prewarmTenantRouter(channel, userId);
 
   // Sync: fast-path direct Bedrock call (~2-3s)
-  const fastText = await fastPathBedrock(userText);
-  if (fastText) {
-    log(`Fast-path response for ${tenantKey}: ${fastText.slice(0, 60)}`);
-    return fastText;
+  const fastResult = await fastPathBedrock(userText);
+  if (fastResult) {
+    log(`Fast-path response for ${tenantKey}: ${fastResult.text.slice(0, 60)}`);
+    reportFastPathUsage(channel, userId, fastResult.inputTokens, fastResult.outputTokens);
+    return fastResult.text;
   }
 
   // Fast-path failed (SDK not available or Bedrock error): wait for full pipeline

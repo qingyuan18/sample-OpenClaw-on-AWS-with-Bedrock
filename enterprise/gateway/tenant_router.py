@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 STACK_NAME = os.environ.get("STACK_NAME", "dev")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+AGENTCORE_REGION = os.environ.get("AGENTCORE_REGION", AWS_REGION)
 DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise")
 DYNAMODB_REGION = os.environ.get("DYNAMODB_REGION", "us-east-2")
 RUNTIME_ID = os.environ.get("AGENTCORE_RUNTIME_ID", "")
@@ -253,7 +254,7 @@ def _agentcore_client():
         connect_timeout=10,
         retries={"max_attempts": 0},
     )
-    return boto3.client("bedrock-agentcore", region_name=AWS_REGION, config=cfg)
+    return boto3.client("bedrock-agentcore", region_name=AGENTCORE_REGION, config=cfg)
 
 
 def invoke_agent_runtime(
@@ -357,9 +358,9 @@ def _invoke_agentcore(tenant_id: str, message: str, model: Optional[str],
     if not runtime_arn:
         # Construct ARN from runtime ID + region + account
         try:
-            sts = boto3.client("sts", region_name=AWS_REGION)
+            sts = boto3.client("sts", region_name=AGENTCORE_REGION)
             account_id = sts.get_caller_identity()["Account"]
-            runtime_arn = f"arn:aws:bedrock-agentcore:{AWS_REGION}:{account_id}:runtime/{effective_runtime_id}"
+            runtime_arn = f"arn:aws:bedrock-agentcore:{AGENTCORE_REGION}:{account_id}:runtime/{effective_runtime_id}"
             logger.info("Constructed runtime ARN: %s", runtime_arn)
         except Exception as e:
             logger.error("Could not construct runtime ARN: %s", e)
@@ -579,7 +580,7 @@ class TenantRouterHandler(BaseHTTPRequestHandler):
 
                 try:
                     import boto3 as _b3stop
-                    sts = _b3stop.client("sts", region_name=AWS_REGION)
+                    sts = _b3stop.client("sts", region_name=AGENTCORE_REGION)
                     account_id = sts.get_caller_identity()["Account"]
                     runtime_arn = f"arn:aws:bedrock-agentcore:{AWS_REGION}:{account_id}:runtime/{effective_runtime}"
 

@@ -28,3 +28,5 @@ enterprise/.env
 enterprise/.env.*
 !enterprise/.env.example
 .claude/
+Fix_admin_console_issue.md
+.gitignore

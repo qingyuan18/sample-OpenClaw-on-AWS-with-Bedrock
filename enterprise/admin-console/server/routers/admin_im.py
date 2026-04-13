@@ -5,6 +5,7 @@ Endpoints:
   /api/v1/admin/im-channel-connections
   /api/v1/admin/im-channels
   /api/v1/internal/im-binding-check
+  /api/v1/internal/fast-path-usage
   /api/v1/admin/im-channels/{channel}/test
 """
 
@@ -282,5 +283,72 @@ def test_im_channel(channel: str, authorization: str = Header(default="")):
                 "error": f"{channel.capitalize()} bot not configured in OpenClaw. Open Gateway UI (port 18789) → Channels → Add {channel.capitalize()}.",
             }
         return {"ok": False, "error": "Could not reach OpenClaw CLI. Ensure openclaw gateway is running."}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/api/v1/internal/fast-path-usage")
+def fast_path_usage(body: dict):
+    """Internal endpoint called by H2 Proxy after a fast-path Bedrock response.
+    Writes a USAGE record to DynamoDB so cold-start requests appear in the
+    Usage & Cost dashboard.  No auth — only reachable from localhost."""
+    from datetime import datetime, timezone
+    from decimal import Decimal
+
+    channel = body.get("channel", "")
+    user_id = body.get("userId", "")
+    model = body.get("model", "unknown")
+    input_tokens = int(body.get("inputTokens", 0))
+    output_tokens = int(body.get("outputTokens", 0))
+
+    # Resolve employee (agent) ID from IM binding
+    mapping = db.get_user_mapping(channel, user_id)
+    base_id = (mapping or {}).get("employeeId", f"{channel}__{user_id}")
+
+    # Cost estimate (same formula as agent-container/server.py)
+    _MODEL_PRICING = {
+        "global.amazon.nova-2-lite-v1:0": (0.30, 2.50),
+        "us.amazon.nova-pro-v1:0": (0.80, 3.20),
+        "global.anthropic.claude-sonnet-4-5-20250929-v1:0": (3.00, 15.00),
+        "global.anthropic.claude-opus-4-6-v1": (15.00, 75.00),
+        "global.anthropic.claude-opus-4-5-20251101-v1:0": (15.00, 75.00),
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0": (0.80, 4.00),
+        "global.anthropic.claude-sonnet-4-20250514-v1:0": (3.00, 15.00),
+        "us.deepseek.r1-v1:0": (1.35, 5.40),
+        "us.meta.llama3-3-70b-instruct-v1:0": (0.72, 0.72),
+    }
+    in_price, out_price = _MODEL_PRICING.get(model, (0.30, 2.50))
+    cost = Decimal(str(round(
+        input_tokens * in_price / 1_000_000 + output_tokens * out_price / 1_000_000, 6
+    )))
+
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    org_pk = "ORG#acme"
+
+    try:
+        ddb = boto3.resource("dynamodb", region_name=os.environ.get("DYNAMODB_REGION", "us-east-2"))
+        table = ddb.Table(os.environ.get("DYNAMODB_TABLE", "openclaw-enterprise"))
+        table.update_item(
+            Key={"PK": org_pk, "SK": f"USAGE#{base_id}#{today}"},
+            UpdateExpression=(
+                "SET #d = :date, agentId = :aid, model = :model, "
+                "GSI1PK = :gsi1pk, GSI1SK = :gsi1sk "
+                "ADD inputTokens :inp, outputTokens :out, requests :one, cost :cost"
+            ),
+            ExpressionAttributeNames={"#d": "date"},
+            ExpressionAttributeValues={
+                ":date": today,
+                ":aid": base_id,
+                ":model": model,
+                ":inp": input_tokens,
+                ":out": output_tokens,
+                ":one": 1,
+                ":cost": cost,
+                ":gsi1pk": "TYPE#usage",
+                ":gsi1sk": f"USAGE#{today}#{base_id}",
+            },
+        )
+        return {"ok": True, "agentId": base_id, "cost": str(cost)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
