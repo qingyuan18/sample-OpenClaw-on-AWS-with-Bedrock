@@ -453,6 +453,51 @@ aws cloudformation describe-stack-events \
   --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`]'
 ```
 
+### 13. WeChat Plugin: CDN Upload Server Error 500
+
+**Symptom**: Sending files via WeChat fails with:
+```
+[tools] message failed: CDN upload server error: status 500
+```
+
+**Cause**: WeChat's CDN rejects the file upload. Common triggers: file too large (>25MB for non-media), WeChat login session expired, or CDN rate limiting.
+
+**Fix**:
+- Check file size: `ls -lh /tmp/<filename>`
+- If session expired, re-login: `OPENCLAW_HOME=/home/ubuntu/.openclaw-wechat openclaw channels login --channel openclaw-weixin`
+- **Permanent workaround**: In SOUL.md, instruct the agent to upload files to S3 and send pre-signed URL links instead of file attachments, bypassing WeChat CDN entirely:
+  ```bash
+  aws s3 cp /tmp/file.pptx s3://<bucket>/shares/file.pptx --region us-east-1
+  aws s3 presign s3://<bucket>/shares/file.pptx --region us-east-1 --expires-in 86400
+  ```
+
+---
+
+### 14. WeChat Gateway: Agent Timeout Loop After Failed File Delivery
+
+**Symptom**: All new WeChat messages get no response. Logs show repeated `llm-idle-timeout` and `surface_error reason=timeout` every ~2 minutes:
+```
+[agent/embedded] embedded run failover decision: decision=surface_error reason=timeout
+```
+
+**Cause**: Failed file deliveries accumulate in `~/.openclaw-wechat/.openclaw/delivery-queue/` as JSON files. The delivery-recovery system retries them on every new message, blocking the agent event loop and causing all subsequent requests to timeout.
+
+**Fix**:
+```bash
+kill -9 $(pgrep -f "openclaw-wechat")
+rm -f /home/ubuntu/.openclaw-wechat/.openclaw/delivery-queue/*.json
+rm -f /tmp/*.pptx
+
+nvm use 22.21.0
+OPENCLAW_HOME=/home/ubuntu/.openclaw-wechat \
+AWS_REGION=us-east-1 \
+AWS_DEFAULT_REGION=us-east-1 \
+AWS_PROFILE=default \
+  nohup openclaw gateway run > /tmp/openclaw-wechat.log 2>&1 &
+```
+
+---
+
 ## Diagnostic Scripts
 
 ### Complete Health Check
