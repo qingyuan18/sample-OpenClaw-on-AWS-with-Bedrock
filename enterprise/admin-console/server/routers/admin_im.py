@@ -172,22 +172,28 @@ def get_im_channels(authorization: str = Header(default="")):
     require_role(authorization, roles=["admin", "manager"])
     ssm = boto3.client("ssm", region_name=GATEWAY_REGION)
 
-    # Get all user mappings to count per channel
+    # Get all user mappings to count per channel (DynamoDB primary, SSM fallback)
     channel_counts: dict = {}
     try:
-        prefix = _mapping_prefix()
-        resp = ssm.get_parameters_by_path(Path=prefix, Recursive=True, MaxResults=10)
-        for p in resp.get("Parameters", []):
-            name = p["Name"].replace(prefix, "")
-            for ch in ["telegram", "discord", "slack", "whatsapp", "feishu", "dingtalk", "teams", "googlechat"]:
-                if name.startswith(f"{ch}__"):
-                    channel_counts[ch] = channel_counts.get(ch, 0) + 1
-                    break
-            else:
-                # Bare user_id mappings — count but don't attribute to a channel
-                pass
+        ddb_mappings = db.get_user_mappings()
+        for m in ddb_mappings:
+            ch = m.get("channel", "")
+            if ch:
+                channel_counts[ch] = channel_counts.get(ch, 0) + 1
     except Exception:
         pass
+    if not channel_counts:
+        try:
+            prefix = _mapping_prefix()
+            resp = ssm.get_parameters_by_path(Path=prefix, Recursive=True, MaxResults=10)
+            for p in resp.get("Parameters", []):
+                name = p["Name"].replace(prefix, "")
+                for ch in ["telegram", "discord", "slack", "whatsapp", "feishu", "dingtalk", "teams", "googlechat"]:
+                    if name.startswith(f"{ch}__"):
+                        channel_counts[ch] = channel_counts.get(ch, 0) + 1
+                        break
+        except Exception:
+            pass
 
     # Get live Gateway channel status
     gateway_channels = _run_openclaw_channels()
@@ -214,7 +220,10 @@ def get_im_channels(authorization: str = Header(default="")):
         if gw and "raw" not in gw:
             configured = True
             linked = True
-        status = "connected" if (configured and linked) else \
+        # External bridges (dingtalk, wechat) are not OpenClaw built-in channels.
+        # Treat them as connected if they have employee mappings in DynamoDB.
+        has_mappings = channel_counts.get(ch["id"], 0) > 0
+        status = "connected" if (configured and linked) or (ch["id"] in ("dingtalk", "wechat") and has_mappings) else \
                  "configured" if configured else "not_connected"
         result.append({
             **ch,

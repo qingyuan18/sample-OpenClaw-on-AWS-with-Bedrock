@@ -30,3 +30,4 @@ enterprise/.env.*
 .claude/
 Fix_admin_console_issue.md
 .gitignore
+DingTalk_channel_integration.md
