@@ -8,8 +8,8 @@ Type=simple
 User=ubuntu
 Environment=DINGTALK_APP_KEY=
 Environment=DINGTALK_APP_SECRET=
-Environment=H2_PROXY_URL=http://127.0.0.1:8091
-ExecStart=/usr/bin/python3 /opt/openclaw/enterprise/gateway/dingtalk_stream_bridge.py
+Environment=H2_PROXY_URL=http://127.0.0.1:8092
+ExecStart=/usr/bin/python3 /home/ubuntu/dingtalk_stream_bridge.py
 Restart=always
 RestartSec=5
 

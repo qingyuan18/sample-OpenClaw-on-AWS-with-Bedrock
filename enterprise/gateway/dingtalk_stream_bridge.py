@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 APP_KEY = os.environ.get("DINGTALK_APP_KEY", "")
 APP_SECRET = os.environ.get("DINGTALK_APP_SECRET", "")
-H2_PROXY_URL = os.environ.get("H2_PROXY_URL", "http://127.0.0.1:8091")
+H2_PROXY_URL = os.environ.get("H2_PROXY_URL", "http://127.0.0.1:8092")
 
 DINGTALK_TOKEN_URL = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
 DINGTALK_STREAM_URL = "https://api.dingtalk.com/v1.0/gateway/connections/open"
@@ -63,6 +63,9 @@ def open_stream_connection(token):
     payload = json.dumps({
         "clientId": APP_KEY,
         "clientSecret": APP_SECRET,
+        "subscriptions": [
+            {"type": "CALLBACK", "topic": "/v1.0/im/bot/messages/get"},
+        ],
     }).encode()
     req = urllib.request.Request(
         DINGTALK_STREAM_URL,
@@ -82,18 +85,16 @@ def open_stream_connection(token):
 
 def forward_to_proxy(channel, user_id, message_text):
     """Forward message to H2 Proxy in Bedrock Converse API format."""
+    meta_json = json.dumps({"channel": "dingtalk", "sender_id": user_id})
     bedrock_payload = {
         "modelId": "default",
         "messages": [
             {
                 "role": "user",
                 "content": [
-                    {"text": message_text},
+                    {"text": f"```json\n{meta_json}\n```\n{message_text}"},
                 ],
             }
-        ],
-        "system": [
-            {"text": f"channel: dingtalk\nuser_id: {user_id}"}
         ],
     }
     data = json.dumps(bedrock_payload).encode()
