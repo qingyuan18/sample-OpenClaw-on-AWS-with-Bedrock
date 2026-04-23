@@ -33,8 +33,12 @@ RUN if [ "$TARGETARCH" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then \
     fi && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install \
     && rm -rf /tmp/aws /tmp/awscli.zip
 
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
+# Install Node.js 22 (>=22.12 required by OpenClaw)
+ARG NODE_VERSION=22.16.0
+RUN ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/') && \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${ARCH}.tar.xz" \
+    | tar -xJ --strip-components=1 -C /usr/local && \
+    node --version
 
 # Pin the openclaw npm package to 2026.3.24 — same as agent-container/Dockerfile.
 # 2026.3.28 changed Gateway response delivery, breaking IM channel integration.
@@ -72,9 +76,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends jq \
 
 RUN pip install --no-cache-dir awscli boto3 requests
 
-COPY --from=builder /usr/bin/node /usr/bin/node
-COPY --from=builder /usr/lib/node_modules /usr/lib/node_modules
-RUN ln -sf /usr/lib/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw
+COPY --from=builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw && \
+    ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 COPY --from=builder /app/.compile-cache /app/.compile-cache
 COPY --from=builder /app/docs/reference /app/docs/reference
 COPY --from=builder /skills /root/.openclaw/skills

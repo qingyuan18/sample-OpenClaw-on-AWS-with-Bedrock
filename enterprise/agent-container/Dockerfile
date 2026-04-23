@@ -19,9 +19,12 @@ RUN if [ "$TARGETARCH" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then \
     fi && unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install \
     && rm -rf /tmp/aws /tmp/awscli.zip
 
-# Install Node.js 22 (required by OpenClaw)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
+# Install Node.js 22 (>=22.12 required by OpenClaw)
+ARG NODE_VERSION=22.16.0
+RUN ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/') && \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${ARCH}.tar.xz" \
+    | tar -xJ --strip-components=1 -C /usr/local && \
+    node --version
 
 # Install OpenClaw and ClawHub CLI globally via npm
 # Pin the openclaw npm package to 2026.3.24.
@@ -68,11 +71,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends jq curl \
 RUN pip install --no-cache-dir awscli boto3 requests
 
 # Copy Node.js runtime + global modules from builder
-COPY --from=builder /usr/bin/node /usr/bin/node
-COPY --from=builder /usr/lib/node_modules /usr/lib/node_modules
+COPY --from=builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 
-# Re-create openclaw symlink (COPY resolves symlinks, breaking ESM imports)
-RUN ln -sf /usr/lib/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw
+# Re-create openclaw and npm symlinks
+RUN ln -sf /usr/local/lib/node_modules/openclaw/openclaw.mjs /usr/local/bin/openclaw && \
+    ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 
 # Copy V8 compile cache + templates from builder
 COPY --from=builder /app/.compile-cache /app/.compile-cache
