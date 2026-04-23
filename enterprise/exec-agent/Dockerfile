@@ -24,7 +24,7 @@ FROM --platform=linux/arm64 python:3.12-slim AS builder
 ARG TARGETARCH=arm64
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl unzip git && rm -rf /var/lib/apt/lists/*
+    curl unzip git xz-utils && rm -rf /var/lib/apt/lists/*
 
 RUN if [ "$TARGETARCH" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then \
         curl -sL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "/tmp/awscli.zip"; \
