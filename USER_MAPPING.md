@@ -10,13 +10,69 @@
 4. **Position → Runtime** — 查询 `CONFIG#routing` 将职位映射到 AgentCore Runtime（Standard / Executive），决定镜像、模型、IAM 权限
 5. **生成 SessionId** — 格式 `emp__{emp_id}__{hash}`，所有 IM 渠道共享同一 session，保留跨渠道上下文
 
+## 手动创建 Admin 用户（跳过 Admin Console）
+
+如果无法通过 Admin Console 创建员工，可以直接在 DynamoDB 中写入员工记录。
+
+### 写入员工记录
+
+员工记录的 Key 格式为 `PK = ORG#acme`，`SK = EMP#{emp_id}`。`role` 字段设为 `admin` 即拥有管理员权限。
+
+```bash
+aws dynamodb put-item \
+  --table-name openclaw-enterprise \
+  --item '{
+    "PK": {"S": "ORG#acme"},
+    "SK": {"S": "EMP#emp-newadmin"},
+    "GSI1PK": {"S": "TYPE#emp"},
+    "GSI1SK": {"S": "EMP#emp-newadmin"},
+    "id": {"S": "emp-newadmin"},
+    "name": {"S": "New Admin"},
+    "role": {"S": "admin"},
+    "employeeNo": {"S": "EMP-002"},
+    "departmentId": {"S": "dept-eng"},
+    "departmentName": {"S": "Engineering"},
+    "positionId": {"S": "pos-sa"},
+    "positionName": {"S": "Solutions Architect"},
+    "channels": {"L": [{"S": "discord"}, {"S": "slack"}]},
+    "createdAt": {"S": "2026-04-23T00:00:00Z"}
+  }'
+```
+
+> **字段说明：**
+>
+> | 字段 | 必填 | 说明 |
+> |------|------|------|
+> | `PK` | 是 | 组织标识，固定为 `ORG#acme` |
+> | `SK` | 是 | 员工主键，格式 `EMP#{emp_id}`，需唯一 |
+> | `GSI1PK` | 是 | 全局索引分区键，固定为 `TYPE#emp` |
+> | `GSI1SK` | 是 | 全局索引排序键，与 `SK` 相同 |
+> | `id` | 是 | 员工 ID，与 SK 中的 `{emp_id}` 一致 |
+> | `name` | 是 | 员工姓名 |
+> | `role` | 是 | 角色，`admin` 为管理员，`member` 为普通成员 |
+> | `employeeNo` | 否 | 工号，用于展示 |
+> | `departmentId` / `departmentName` | 否 | 所属部门 |
+> | `positionId` / `positionName` | 是 | 所属职位，决定 Skills、模型、知识库和 Runtime 路由 |
+> | `channels` | 否 | 该员工可使用的 IM 渠道列表 |
+> | `createdAt` | 否 | 创建时间，ISO 8601 格式 |
+
+### 验证员工记录
+
+```bash
+aws dynamodb get-item \
+  --table-name openclaw-enterprise \
+  --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "EMP#emp-newadmin"}}'
+```
+
+确认返回的 `role` 为 `admin` 后，该用户即拥有管理员权限。创建员工后，还需要添加渠道用户映射（见下一节）才能通过 IM 渠道与 Bot 对话。
+
 ## 手动添加渠道用户映射（跳过扫码配对）
 
-在 Admin Console 创建员工后，默认需要员工在 IM 渠道中扫码完成自助配对。如果希望跳过扫码步骤，可以直接在 DynamoDB 中写入映射记录。
+在 Admin Console 或通过上述方式创建员工后，默认需要员工在 IM 渠道中扫码完成自助配对。如果希望跳过扫码步骤，可以直接在 DynamoDB 中写入映射记录。
 
 ### 前置条件
 
-- 已在 Admin Console 中创建员工，获得 `employeeId`（如 `emp-001`）
+- 已创建员工，获得 `employeeId`（如 `emp-001`）
 - 已获取员工在目标 IM 平台的用户 ID
 
 ### 各平台用户 ID 获取方式
