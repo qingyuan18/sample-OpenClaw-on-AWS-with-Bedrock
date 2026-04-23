@@ -490,6 +490,23 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
         except IOError:
             pass
 
+        # Restore .memory-index.sqlite from S3 (cron/scheduled tasks live here).
+        # Without this, tasks created in a previous microVM session are lost.
+        sqlite_local = os.path.join(WORKSPACE, ".memory-index.sqlite")
+        sqlite_s3 = f"{s3_base}/workspace/.memory-index.sqlite"
+        if not os.path.isfile(sqlite_local):
+            try:
+                result = subprocess.run(
+                    ["aws", "s3", "cp", sqlite_s3, sqlite_local, "--quiet"],
+                    capture_output=True, text=True, timeout=15,
+                )
+                if result.returncode == 0 and os.path.isfile(sqlite_local):
+                    logger.info("Restored .memory-index.sqlite from S3 for %s", base_id)
+                else:
+                    logger.info("No .memory-index.sqlite in S3 for %s (first run)", base_id)
+            except Exception as e:
+                logger.warning("SQLite restore failed (non-fatal): %s", e)
+
         # Synthesize MEMORY.md from daily memory files if it's empty.
         # In serverless AgentCore microVMs, the OpenClaw Gateway compaction daemon
         # never runs persistently, so MEMORY.md stays at "# Memory" (9 bytes) forever.
@@ -838,6 +855,15 @@ def _sync_heartbeat_and_memory(base_id: str) -> None:
                 ["aws", "s3", "cp", memory_md_path, f"{sync_target}MEMORY.md", "--quiet"],
                 capture_output=True, text=True, timeout=10,
             )
+        # Sync .memory-index.sqlite (cron/scheduled tasks, memory index)
+        sqlite_path = os.path.join(WORKSPACE, ".memory-index.sqlite")
+        if os.path.isfile(sqlite_path):
+            subprocess.run(
+                ["aws", "s3", "cp", sqlite_path,
+                 f"{sync_target}.memory-index.sqlite", "--quiet"],
+                capture_output=True, text=True, timeout=15,
+            )
+            logger.info(".memory-index.sqlite synced to S3 for %s", base_id)
     except Exception as e:
         logger.warning("Post-invocation S3 sync failed (non-fatal): %s", e)
 

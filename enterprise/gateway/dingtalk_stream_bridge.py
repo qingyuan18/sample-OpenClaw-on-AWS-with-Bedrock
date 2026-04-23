@@ -40,6 +40,11 @@ DINGTALK_STREAM_URL = "https://api.dingtalk.com/v1.0/gateway/connections/open"
 DINGTALK_REPLY_URL = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
 
 
+_token_lock = threading.Lock()
+_current_token = ""
+_token_expires_at = 0.0
+
+
 def get_access_token():
     """Get DingTalk access token via app credentials."""
     payload = json.dumps({"appKey": APP_KEY, "appSecret": APP_SECRET}).encode()
@@ -58,7 +63,20 @@ def get_access_token():
     return token
 
 
-def open_stream_connection(token):
+def refresh_token_if_needed():
+    """Refresh the shared token if it's about to expire. Thread-safe."""
+    global _current_token, _token_expires_at
+    if time.time() < _token_expires_at:
+        return _current_token
+    with _token_lock:
+        if time.time() < _token_expires_at:
+            return _current_token
+        _current_token = get_access_token()
+        _token_expires_at = time.time() + 6000
+        return _current_token
+
+
+def open_stream_connection():
     """Open a DingTalk Stream connection, returns WebSocket endpoint + ticket."""
     payload = json.dumps({
         "clientId": APP_KEY,
@@ -83,7 +101,7 @@ def open_stream_connection(token):
     return endpoint, ticket
 
 
-def forward_to_proxy(channel, user_id, message_text):
+def forward_to_proxy(user_id, message_text):
     """Forward message to H2 Proxy in Bedrock Converse API format."""
     meta_json = json.dumps({"channel": "dingtalk", "sender_id": user_id})
     bedrock_payload = {
@@ -105,7 +123,7 @@ def forward_to_proxy(channel, user_id, message_text):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=300) as resp:
             result = json.loads(resp.read())
         output = result.get("output", {})
         content = output.get("message", {}).get("content", [])
@@ -140,7 +158,7 @@ def reply_to_user(token, user_id, text):
         logger.error("Reply to %s failed: %s", user_id, e)
 
 
-def handle_message(token, msg_data):
+def handle_message(msg_data):
     """Handle a single incoming DingTalk message."""
     sender_id = msg_data.get("senderStaffId", "") or msg_data.get("senderId", "")
     text_content = ""
@@ -156,9 +174,10 @@ def handle_message(token, msg_data):
 
     logger.info("Message from %s: %s", sender_id, text_content[:80])
 
-    response_text = forward_to_proxy("dingtalk", sender_id, text_content)
+    response_text = forward_to_proxy(sender_id, text_content)
     logger.info("Response to %s: %s", sender_id, response_text[:80])
 
+    token = refresh_token_if_needed()
     reply_to_user(token, sender_id, response_text)
 
 
@@ -170,16 +189,10 @@ def run_stream():
         logger.error("websocket-client not installed. Run: pip install websocket-client")
         sys.exit(1)
 
-    token = get_access_token()
-    token_refresh_at = time.time() + 6000  # refresh before 7200s expiry
-
     while True:
         try:
-            if time.time() > token_refresh_at:
-                token = get_access_token()
-                token_refresh_at = time.time() + 6000
-
-            endpoint, ticket = open_stream_connection(token)
+            refresh_token_if_needed()
+            endpoint, ticket = open_stream_connection()
 
             ws_url = f"{endpoint}?ticket={ticket}"
             logger.info("Connecting to Stream WebSocket...")
@@ -232,7 +245,7 @@ def run_stream():
                     if topic == "/v1.0/im/bot/messages/get":
                         threading.Thread(
                             target=handle_message,
-                            args=(token, data),
+                            args=(data,),
                             daemon=True,
                         ).start()
                     else:
