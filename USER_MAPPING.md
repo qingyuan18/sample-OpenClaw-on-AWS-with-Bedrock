@@ -38,7 +38,7 @@
 ```bash
 # 飞书用户映射
 aws dynamodb put-item \
-  --table-name <YourTableName> \
+  --table-name openclaw-enterprise \
   --item '{
     "PK": {"S": "MAPPING#feishu__ou_xxxxxxxxxxxx"},
     "employeeId": {"S": "emp-001"}
@@ -46,7 +46,7 @@ aws dynamodb put-item \
 
 # Discord 用户映射
 aws dynamodb put-item \
-  --table-name <YourTableName> \
+  --table-name openclaw-enterprise \
   --item '{
     "PK": {"S": "MAPPING#discord__123456789012345678"},
     "employeeId": {"S": "emp-001"}
@@ -54,7 +54,7 @@ aws dynamodb put-item \
 
 # Telegram 用户映射
 aws dynamodb put-item \
-  --table-name <YourTableName> \
+  --table-name openclaw-enterprise \
   --item '{
     "PK": {"S": "MAPPING#telegram__987654321"},
     "employeeId": {"S": "emp-001"}
@@ -62,21 +62,21 @@ aws dynamodb put-item \
 
 # Slack 用户映射
 aws dynamodb put-item \
-  --table-name <YourTableName> \
+  --table-name openclaw-enterprise \
   --item '{
     "PK": {"S": "MAPPING#slack__U04ABCDEF12"},
     "employeeId": {"S": "emp-001"}
   }'
 ```
 
-> **注意：** 将 `<YourTableName>` 替换为实际的 DynamoDB 表名，`employeeId` 替换为 Admin Console 中创建的真实员工 ID。同一个员工可以绑定多个渠道，所有渠道共享同一 session 上下文。
+> **注意：** 将 `openclaw-enterprise` 替换为实际的 DynamoDB 表名，`employeeId` 替换为 Admin Console 中创建的真实员工 ID。同一个员工可以绑定多个渠道，所有渠道共享同一 session 上下文。
 
 ### 验证映射
 
 ```bash
 # 查询某个渠道用户的映射是否生效
 aws dynamodb get-item \
-  --table-name <YourTableName> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "MAPPING#feishu__ou_xxxxxxxxxxxx"}}'
 ```
 
@@ -86,7 +86,7 @@ aws dynamodb get-item \
 
 员工创建后，其 AI Agent 的能力由多个 DynamoDB 配置项共同决定，遵循**职位（Position）→ 员工（Employee）**的覆盖层级。以下介绍如何通过 DDB 直接配置。
 
-> **约定：** 以下示例中 `<Table>` 代表实际 DynamoDB 表名（与 `STACK_NAME` 相同），所有记录的 `PK` 均为 `ORG#acme`。
+> **约定：** 以下示例中 `openclaw-enterprise` 代表实际 DynamoDB 表名（与 `STACK_NAME` 相同），所有记录的 `PK` 均为 `ORG#acme`。
 
 ### 1. 模型配置（CONFIG#model）
 
@@ -96,7 +96,7 @@ aws dynamodb get-item \
 
 ```bash
 aws dynamodb get-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "CONFIG#model"}}'
 ```
 
@@ -106,7 +106,7 @@ aws dynamodb get-item \
 
 ```bash
 aws dynamodb update-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "CONFIG#model"}}' \
   --update-expression "SET positionOverrides.#pid = :val" \
   --expression-attribute-names '{"#pid": "pos-fa"}' \
@@ -123,7 +123,7 @@ aws dynamodb update-item \
 
 ```bash
 aws dynamodb update-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "CONFIG#model"}}' \
   --update-expression "SET employeeOverrides.#eid = :val" \
   --expression-attribute-names '{"#eid": "emp-001"}' \
@@ -143,7 +143,7 @@ Skills 和工具白名单定义在职位记录中（`SK = POS#{pos_id}`）。员
 
 ```bash
 aws dynamodb get-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "POS#pos-fa"}}'
 ```
 
@@ -151,7 +151,7 @@ aws dynamodb get-item \
 
 ```bash
 aws dynamodb update-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "POS#pos-fa"}}' \
   --update-expression "SET defaultSkills = :skills" \
   --expression-attribute-values '{":skills": {"L": [
@@ -166,7 +166,7 @@ aws dynamodb update-item \
 
 ```bash
 aws dynamodb update-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "POS#pos-fa"}}' \
   --update-expression "SET toolAllowlist = :tools" \
   --expression-attribute-values '{":tools": {"L": [
@@ -188,7 +188,7 @@ Agent 行为参数（记忆压缩、上下文窗口、响应语言）存储在 `
 
 ```bash
 aws dynamodb get-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "CONFIG#agent-config"}}'
 ```
 
@@ -196,7 +196,7 @@ aws dynamodb get-item \
 
 ```bash
 aws dynamodb update-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "CONFIG#agent-config"}}' \
   --update-expression "SET positionConfig.#pid = :val" \
   --expression-attribute-names '{"#pid": "pos-exec"}' \
@@ -212,7 +212,7 @@ aws dynamodb update-item \
 
 ```bash
 aws dynamodb update-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "CONFIG#agent-config"}}' \
   --update-expression "SET employeeConfig.#eid = :val" \
   --expression-attribute-names '{"#eid": "emp-001"}' \
@@ -239,7 +239,7 @@ aws dynamodb update-item \
 
 ```bash
 aws dynamodb update-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "CONFIG#kb-assignments"}}' \
   --update-expression "SET positionKBs.#pid = :kbs" \
   --expression-attribute-names '{"#pid": "pos-fa"}' \
@@ -260,7 +260,7 @@ aws dynamodb update-item \
 
 ```bash
 aws dynamodb update-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "CONFIG#routing"}}' \
   --update-expression "SET position_runtime.#pid = :rid" \
   --expression-attribute-names '{"#pid": "pos-exec"}' \
@@ -271,7 +271,7 @@ aws dynamodb update-item \
 
 ```bash
 aws dynamodb update-item \
-  --table-name <Table> \
+  --table-name openclaw-enterprise \
   --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "CONFIG#routing"}}' \
   --update-expression "SET employee_override.#eid = :rid" \
   --expression-attribute-names '{"#eid": "emp-001"}' \

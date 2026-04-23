@@ -164,6 +164,7 @@ fi
 # =============================================================================
 openclaw gateway --port 18789 > /tmp/openclaw-gateway.log 2>&1 &
 GATEWAY_PID=$!
+echo "$GATEWAY_PID" > /tmp/gateway.pid
 echo "[entrypoint] OpenClaw Gateway PID=${GATEWAY_PID}"
 
 # Wait up to 30s for Gateway to start listening
@@ -178,7 +179,11 @@ for i in $(seq 1 30); do
     sleep 1
 done
 if [ "$GATEWAY_READY" = "false" ]; then
-    echo "[entrypoint] WARNING: Gateway not ready after 30s (may still be starting)"
+    echo "[entrypoint] WARNING: Gateway not ready after 30s. Gateway log:"
+    cat /tmp/openclaw-gateway.log 2>/dev/null || true
+else
+    echo "[entrypoint] Gateway startup log:"
+    cat /tmp/openclaw-gateway.log 2>/dev/null || true
 fi
 
 # Auto-pair Control UI and store the dashboard URL token in SSM.
@@ -290,6 +295,18 @@ echo "[entrypoint] server.py PID=${SERVER_PID}"
     echo "[bg] Workspace + skills ready"
     echo "WORKSPACE_READY" > /tmp/workspace_status
 
+    # Gateway liveness check — restart if it crashed after initial startup
+    GW_PID=$(cat /tmp/gateway.pid 2>/dev/null || echo "")
+    if [ -n "$GW_PID" ] && ! kill -0 "$GW_PID" 2>/dev/null; then
+        echo "[bg] WARNING: Gateway PID ${GW_PID} is dead. Last 20 lines of gateway log:"
+        tail -20 /tmp/openclaw-gateway.log 2>/dev/null || true
+        echo "[bg] Restarting Gateway..."
+        openclaw gateway --port 18789 > /tmp/openclaw-gateway.log 2>&1 &
+        echo "$!" > /tmp/gateway.pid
+        echo "[bg] Gateway restarted PID=$!"
+        sleep 5
+    fi
+
     # Watchdog: sync workspace back to S3
     # EFS mode: EFS handles persistence — skip periodic S3 sync (zero API overhead)
     # S3 mode: sync every SYNC_INTERVAL seconds
@@ -344,6 +361,7 @@ cleanup() {
     # Step 2: Signal Gateway to shut down gracefully and WAIT for it to finish.
     # The Gateway writes session state (MEMORY.md) during graceful shutdown.
     # Without waiting, the final sync below runs before MEMORY.md is updated.
+    GATEWAY_PID=$(cat /tmp/gateway.pid 2>/dev/null || echo "$GATEWAY_PID")
     kill -SIGTERM "$GATEWAY_PID" 2>/dev/null || true
     # Give Gateway up to 15s to write memory and exit cleanly
     for i in $(seq 1 15); do
