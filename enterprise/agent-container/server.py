@@ -507,6 +507,26 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
             except Exception as e:
                 logger.warning("SQLite restore failed (non-fatal): %s", e)
 
+        # Restore ~/.openclaw/cron/ from S3 (scheduled/recurring tasks).
+        # OpenClaw's built-in Croner scheduler reads jobs.json from this directory.
+        # Without restoring it, cron jobs created in previous microVM sessions are lost.
+        cron_dir = os.path.expanduser("~/.openclaw/cron")
+        cron_s3 = f"{s3_base}/openclaw-cron/"
+        os.makedirs(cron_dir, exist_ok=True)
+        try:
+            result = subprocess.run(
+                ["aws", "s3", "sync", cron_s3, cron_dir + "/", "--quiet"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result.returncode == 0:
+                jobs_file = os.path.join(cron_dir, "jobs.json")
+                if os.path.isfile(jobs_file):
+                    logger.info("Restored cron/jobs.json from S3 for %s", base_id)
+                else:
+                    logger.info("No cron data in S3 for %s (first run)", base_id)
+        except Exception as e:
+            logger.warning("Cron restore failed (non-fatal): %s", e)
+
         # Synthesize MEMORY.md from daily memory files if it's empty.
         # In serverless AgentCore microVMs, the OpenClaw Gateway compaction daemon
         # never runs persistently, so MEMORY.md stays at "# Memory" (9 bytes) forever.
@@ -864,6 +884,15 @@ def _sync_heartbeat_and_memory(base_id: str) -> None:
                 capture_output=True, text=True, timeout=15,
             )
             logger.info(".memory-index.sqlite synced to S3 for %s", base_id)
+        # Sync ~/.openclaw/cron/ (Croner scheduled tasks: jobs.json, jobs-state.json)
+        cron_dir = os.path.expanduser("~/.openclaw/cron")
+        if os.path.isdir(cron_dir) and os.listdir(cron_dir):
+            cron_s3 = f"s3://{S3_BUCKET}/{base_id}/openclaw-cron/"
+            subprocess.run(
+                ["aws", "s3", "sync", cron_dir + "/", cron_s3, "--quiet"],
+                capture_output=True, text=True, timeout=15,
+            )
+            logger.info("cron/ synced to S3 for %s", base_id)
     except Exception as e:
         logger.warning("Post-invocation S3 sync failed (non-fatal): %s", e)
 

@@ -328,6 +328,12 @@ echo "[entrypoint] server.py PID=${SERVER_PID}"
                     --size-only --region "$AWS_REGION" \
                     --quiet 2>/dev/null && echo "[watchdog] Synced to ${SYNC_TARGET}" || true
             fi
+            # Sync cron data periodically
+            CRON_DIR="$HOME/.openclaw/cron"
+            if [ "$CURRENT_BASE" != "unknown" ] && [ -d "$CRON_DIR" ] && [ -n "$(ls -A "$CRON_DIR" 2>/dev/null)" ]; then
+                aws s3 sync "$CRON_DIR/" "s3://${S3_BUCKET}/${CURRENT_BASE}/openclaw-cron/" \
+                    --size-only --region "$AWS_REGION" --quiet 2>/dev/null || true
+            fi
             if [ -f "$WORKSPACE/.shared_agent" ]; then
                 SHARED_ID=$(cat "$WORKSPACE/.shared_agent")
                 aws s3 sync "$WORKSPACE/memory/" "s3://${S3_BUCKET}/_shared/memory/${SHARED_ID}/" \
@@ -405,6 +411,13 @@ cleanup() {
                 --exclude "knowledge/*" \
                 --size-only --region "$AWS_REGION" \
                 --quiet 2>/dev/null || true
+        fi
+        # Persist cron/scheduled tasks (jobs.json, jobs-state.json)
+        CRON_DIR="$HOME/.openclaw/cron"
+        if [ -d "$CRON_DIR" ] && [ -n "$(ls -A "$CRON_DIR" 2>/dev/null)" ]; then
+            aws s3 sync "$CRON_DIR/" "s3://${S3_BUCKET}/${FINAL_BASE}/openclaw-cron/" \
+                --region "$AWS_REGION" --quiet 2>/dev/null || true
+            echo "[entrypoint] Cron data persisted"
         fi
         echo "[entrypoint] Workspace persisted to ${SYNC_TARGET}"
     fi
