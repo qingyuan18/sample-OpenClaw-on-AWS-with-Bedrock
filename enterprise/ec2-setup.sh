@@ -133,8 +133,22 @@ for svc in openclaw-admin tenant-router bedrock-proxy-h2; do
   echo "  $svc → $(systemctl is-active "$svc")"
 done
 
-# Also restart the main OpenClaw gateway (picks up env changes)
-systemctl restart openclaw-gateway 2>/dev/null || true
+# Route Gateway Bedrock calls through H2 Proxy so IM channels (Feishu, Discord, etc.)
+# go through tenant_router → AgentCore instead of the local embedded agent.
+# AWS SDK ignores openclaw.json baseUrl — must set AWS_ENDPOINT_URL_BEDROCK_RUNTIME env var.
+DROPIN_DIR="/home/ubuntu/.config/systemd/user/openclaw-gateway.service.d"
+mkdir -p "$DROPIN_DIR"
+cat > "$DROPIN_DIR/proxy.conf" << 'DROPINEOF'
+[Service]
+Environment=AWS_ENDPOINT_URL_BEDROCK_RUNTIME=http://127.0.0.1:8091
+DROPINEOF
+chown -R ubuntu:ubuntu /home/ubuntu/.config/systemd/user
+echo "  Gateway proxy drop-in installed"
+
+# Restart Gateway (user service)
+sudo -u ubuntu XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload 2>/dev/null || true
+sudo -u ubuntu XDG_RUNTIME_DIR=/run/user/1000 systemctl --user restart openclaw-gateway 2>/dev/null || \
+  systemctl restart openclaw-gateway 2>/dev/null || true
 
 echo ""
 echo "══════════════════════════════════════════════════"
