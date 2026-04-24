@@ -67,9 +67,20 @@ def _get_item(sk: str) -> Optional[dict]:
         return None
 
 
+def _to_decimal(obj):
+    """Recursively convert float to Decimal for DynamoDB compatibility."""
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _to_decimal(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_decimal(i) for i in obj]
+    return obj
+
+
 def _put_item(sk: str, data: dict, gsi1pk: str = "", gsi1sk: str = ""):
     """Put an item."""
-    item = {"PK": ORG_PK, "SK": sk, **data}
+    item = _to_decimal({"PK": ORG_PK, "SK": sk, **data})
     if gsi1pk:
         item["GSI1PK"] = gsi1pk
     if gsi1sk:

@@ -772,6 +772,29 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
             except Exception as e:
                 logger.warning("Gateway workspace mirror failed (non-fatal): %s", e)
 
+        # Inject cron notification instruction — tells the agent to POST results
+        # to /cron-notify after every scheduled/cron task so they reach IM channels.
+        try:
+            soul_path = os.path.join(WORKSPACE, "SOUL.md")
+            if os.path.isfile(soul_path):
+                cron_block = (
+                    "\n\n<!-- CRON NOTIFICATION -->\n"
+                    "## 定时任务结果通知\n"
+                    "当你执行定时任务（scheduled task / cron job）后，**必须**在任务完成后执行以下 shell 命令，"
+                    "将结果发送给用户的 IM 频道（钉钉/飞书/Discord等）：\n"
+                    "```bash\n"
+                    f'curl -s -X POST http://localhost:8080/cron-notify -H "Content-Type: application/json" '
+                    f'-d \'{{"emp_id": "{base_id}", "text": "<你的任务结果摘要>"}}\'\n'
+                    "```\n"
+                    "将 `<你的任务结果摘要>` 替换为你执行完定时任务后的结果概要。"
+                    "这是唯一能让用户在 IM 上收到定时任务通知的方式，**请务必执行**。\n"
+                )
+                with open(soul_path, "a") as f:
+                    f.write(cron_block)
+                logger.info("Cron notify instruction injected into SOUL.md for %s", base_id)
+        except Exception as e:
+            logger.warning("Cron notify SOUL injection failed (non-fatal): %s", e)
+
         # Write SOUL hash + config version to DynamoDB SESSION# for admin monitoring.
         # Admin Console can display this to verify the agent is running the correct config.
         try:
@@ -1217,6 +1240,9 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
             self._respond(500, {"error": str(e)})
 
     def do_POST(self):
+        if self.path == "/cron-notify":
+            self._handle_cron_notify()
+            return
         if self.path != "/invocations":
             self._respond(404, {"error": "not found"})
             return
@@ -1398,6 +1424,50 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
             duration_ms = int(time.time() * 1000) - start_ms
             log_agent_invocation(tenant_id=tenant_id, tools_used=[], duration_ms=duration_ms, status="error")
             logger.error("Invocation failed tenant_id=%s error=%s", tenant_id, e)
+            self._respond(500, {"error": str(e)})
+
+    def _handle_cron_notify(self):
+        """Send a cron task result to SQS for IM delivery on EC2."""
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        try:
+            payload = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            self._respond(400, {"error": "invalid json"})
+            return
+
+        emp_id = payload.get("emp_id", "")
+        text = payload.get("text", "")
+        if not emp_id or not text:
+            self._respond(400, {"error": "emp_id and text required"})
+            return
+
+        queue_url = os.environ.get("CRON_NOTIFY_QUEUE_URL", "")
+        if not queue_url:
+            try:
+                import boto3 as _b3_sqs
+                ssm = _b3_sqs.client("ssm", region_name=AWS_REGION_RUNTIME)
+                resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/cron-notify-queue-url")
+                queue_url = resp["Parameter"]["Value"]
+                os.environ["CRON_NOTIFY_QUEUE_URL"] = queue_url
+            except Exception as e:
+                logger.warning("Cannot resolve cron-notify queue URL: %s", e)
+                self._respond(503, {"error": "SQS queue URL not configured"})
+                return
+
+        try:
+            import boto3 as _b3_sqs2
+            sqs = _b3_sqs2.client("sqs", region_name=AWS_REGION_RUNTIME)
+            msg = json.dumps({
+                "emp_id": emp_id,
+                "text": text,
+                "channel": payload.get("channel", ""),
+                "ts": time.time(),
+            })
+            sqs.send_message(QueueUrl=queue_url, MessageBody=msg)
+            logger.info("Cron notify sent to SQS for %s", emp_id)
+            self._respond(200, {"status": "queued"})
+        except Exception as e:
+            logger.error("SQS send failed: %s", e)
             self._respond(500, {"error": str(e)})
 
     def _respond(self, status: int, body: dict):

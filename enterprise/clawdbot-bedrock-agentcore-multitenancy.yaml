@@ -417,6 +417,18 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:dynamodb:*:${AWS::AccountId}:table/${AWS::StackName}"
                   - !Sub "arn:aws:dynamodb:*:${AWS::AccountId}:table/${AWS::StackName}/index/*"
+        - PolicyName: SQSCronNotifyPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SQSCronNotifyConsume
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueUrl
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt CronNotifyQueue.Arn
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-instance-role"
@@ -511,6 +523,11 @@ Resources:
                 Resource:
                   - !GetAtt TenantWorkspaceBucket.Arn
                   - !Sub "${TenantWorkspaceBucket.Arn}/*"
+              - Sid: SQSCronNotify
+                Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt CronNotifyQueue.Arn
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-agentcore-execution-role"
@@ -518,6 +535,21 @@ Resources:
           Value: openclaw
         - Key: Feature
           Value: multitenancy
+
+  # ==================== SQS — Cron Notification Queue ====================
+  # microVM cron tasks send notification messages here; EC2 tenant_router polls
+  # and delivers to IM channels (DingTalk, Discord, Telegram, etc.)
+  CronNotifyQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-cron-notify"
+      VisibilityTimeout: 60
+      MessageRetentionPeriod: 86400
+      Tags:
+        - Key: Project
+          Value: openclaw
+        - Key: Feature
+          Value: cron-notify
 
   # ==================== Security Group ====================
   OpenClawSecurityGroup:
@@ -871,6 +903,13 @@ Resources:
             --type "SecureString" \
             --region $REGION \
             --overwrite || echo "Failed to save token to SSM"
+
+          aws ssm put-parameter \
+            --name "/openclaw/$STACK_NAME/cron-notify-queue-url" \
+            --value "${CronNotifyQueue}" \
+            --type "String" \
+            --region $REGION \
+            --overwrite || echo "Failed to save cron notify queue URL to SSM"
 
           # Save instance info (non-secret metadata only)
           echo "$INSTANCE_ID" > /home/ubuntu/.openclaw/instance_id.txt
@@ -1278,6 +1317,12 @@ Outputs:
     Value: !If [CreateNewVPC, !Ref PublicSubnet, !Ref ExistingSubnetId]
     Export:
       Name: !Sub "${AWS::StackName}-AlwaysOnSubnet"
+
+  CronNotifyQueueUrl:
+    Description: "SQS Queue URL for cron notification delivery (microVM → EC2 IM channels)"
+    Value: !Ref CronNotifyQueue
+    Export:
+      Name: !Sub "${AWS::StackName}-CronNotifyQueueUrl"
 
   MonthlyCost:
     Description: "Estimated monthly cost (USD)"

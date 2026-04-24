@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional
@@ -635,6 +636,164 @@ def _load_runtime_id_from_ssm():
         logger.warning("Could not load runtime_id from SSM path=%s: %s", ssm_path, e)
 
 
+# ---------------------------------------------------------------------------
+# SQS Cron Notification Consumer
+# Polls CronNotifyQueue for messages from microVM cron tasks, then delivers
+# the notification text to the employee's IM channel (DingTalk, etc.).
+# ---------------------------------------------------------------------------
+
+_CRON_NOTIFY_QUEUE_URL = os.environ.get("CRON_NOTIFY_QUEUE_URL", "")
+
+
+def _load_cron_notify_queue_url():
+    global _CRON_NOTIFY_QUEUE_URL
+    if _CRON_NOTIFY_QUEUE_URL:
+        return
+    try:
+        ssm = boto3.client("ssm", region_name=AWS_REGION)
+        resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/cron-notify-queue-url")
+        _CRON_NOTIFY_QUEUE_URL = resp["Parameter"]["Value"]
+        logger.info("Cron notify queue URL loaded: %s", _CRON_NOTIFY_QUEUE_URL)
+    except Exception as e:
+        logger.warning("Cron notify queue URL not found in SSM: %s", e)
+
+
+def _resolve_im_channel(emp_id: str) -> dict:
+    """Look up employee's IM channel info from DynamoDB MAPPING# entries.
+
+    Returns {"channel": "dingtalk", "channel_user_id": "xxx"} or empty dict.
+    """
+    try:
+        ddb = boto3.resource("dynamodb", region_name=DYNAMODB_REGION)
+        table = ddb.Table(DYNAMODB_TABLE)
+        resp = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key("PK").eq("ORG#acme")
+            & boto3.dynamodb.conditions.Key("SK").begins_with("MAPPING#"),
+            FilterExpression=boto3.dynamodb.conditions.Attr("employeeId").eq(emp_id),
+        )
+        for item in resp.get("Items", []):
+            sk = item.get("SK", "")
+            channel_user_id = item.get("channelUserId", "")
+            if "dingtalk__" in sk or "dt__" in sk:
+                return {"channel": "dingtalk", "channel_user_id": channel_user_id or sk.split("__")[-1]}
+            if "discord__" in sk or "dc__" in sk:
+                return {"channel": "discord", "channel_user_id": channel_user_id or sk.split("__")[-1]}
+            if "telegram__" in sk or "tg__" in sk:
+                return {"channel": "telegram", "channel_user_id": channel_user_id or sk.split("__")[-1]}
+            if "feishu__" in sk or "lark__" in sk:
+                return {"channel": "feishu", "channel_user_id": channel_user_id or sk.split("__")[-1]}
+        # Fallback: return first mapping found
+        if resp.get("Items"):
+            item = resp["Items"][0]
+            sk = item["SK"].replace("MAPPING#", "")
+            parts = sk.split("__")
+            if len(parts) >= 2:
+                return {"channel": parts[0], "channel_user_id": item.get("channelUserId", parts[-1])}
+    except Exception as e:
+        logger.warning("IM channel resolve failed for %s: %s", emp_id, e)
+    return {}
+
+
+def _deliver_im_message(channel: str, channel_user_id: str, text: str) -> bool:
+    """Deliver a message to an IM channel via local bridges on EC2.
+
+    DingTalk: POST to DingTalk oTo API (needs access token).
+    Others: POST to OpenClaw Gateway webhook.
+    """
+    if channel == "dingtalk":
+        try:
+            import urllib.request
+            # Get DingTalk access token from env (set by dingtalk_stream_bridge)
+            app_key = os.environ.get("DINGTALK_APP_KEY", "")
+            app_secret = os.environ.get("DINGTALK_APP_SECRET", "")
+            if not app_key:
+                logger.warning("DINGTALK_APP_KEY not set, cannot deliver cron notification")
+                return False
+            token_payload = json.dumps({"appKey": app_key, "appSecret": app_secret}).encode()
+            token_req = urllib.request.Request(
+                "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+                data=token_payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(token_req, timeout=10) as resp:
+                token_data = json.loads(resp.read())
+            access_token = token_data.get("accessToken", "")
+            if not access_token:
+                logger.error("DingTalk token fetch failed: %s", token_data)
+                return False
+            reply_payload = json.dumps({
+                "robotCode": app_key,
+                "userIds": [channel_user_id],
+                "msgKey": "sampleText",
+                "msgParam": json.dumps({"content": f"[定时任务] {text}"}),
+            }).encode()
+            reply_req = urllib.request.Request(
+                "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend",
+                data=reply_payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-acs-dingtalk-access-token": access_token,
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(reply_req, timeout=10) as resp:
+                result = json.loads(resp.read())
+            logger.info("Cron DingTalk delivery to %s: %s", channel_user_id, result)
+            return True
+        except Exception as e:
+            logger.error("DingTalk cron delivery failed: %s", e)
+            return False
+    else:
+        logger.warning("Cron delivery for channel '%s' not implemented yet", channel)
+        return False
+
+
+def _cron_notify_consumer():
+    """Background thread: poll SQS and deliver cron notifications to IM."""
+    _load_cron_notify_queue_url()
+    if not _CRON_NOTIFY_QUEUE_URL:
+        logger.info("Cron notify consumer disabled (no queue URL)")
+        return
+
+    sqs = boto3.client("sqs", region_name=AWS_REGION)
+    logger.info("Cron notify consumer started, polling %s", _CRON_NOTIFY_QUEUE_URL)
+
+    while True:
+        try:
+            resp = sqs.receive_message(
+                QueueUrl=_CRON_NOTIFY_QUEUE_URL,
+                MaxNumberOfMessages=10,
+                WaitTimeSeconds=20,
+            )
+            for msg in resp.get("Messages", []):
+                try:
+                    body = json.loads(msg["Body"])
+                    emp_id = body.get("emp_id", "")
+                    text = body.get("text", "")
+                    preferred_channel = body.get("channel", "")
+
+                    if emp_id and text:
+                        im_info = _resolve_im_channel(emp_id)
+                        channel = preferred_channel or im_info.get("channel", "")
+                        channel_uid = im_info.get("channel_user_id", "")
+
+                        if channel and channel_uid:
+                            _deliver_im_message(channel, channel_uid, text)
+                        else:
+                            logger.warning("No IM channel found for %s, dropping cron notification", emp_id)
+
+                    sqs.delete_message(
+                        QueueUrl=_CRON_NOTIFY_QUEUE_URL,
+                        ReceiptHandle=msg["ReceiptHandle"],
+                    )
+                except Exception as e:
+                    logger.error("Cron notify message processing failed: %s", e)
+        except Exception as e:
+            logger.error("SQS poll error: %s", e)
+            time.sleep(10)
+
+
 def main():
     _load_runtime_id_from_ssm()
 
@@ -644,6 +803,10 @@ def main():
             "Set AGENTCORE_RUNTIME_ID env var or SSM parameter /openclaw/%s/runtime-id",
             STACK_NAME,
         )
+
+    # Start SQS cron notification consumer in background
+    cron_thread = threading.Thread(target=_cron_notify_consumer, daemon=True, name="cron-notify")
+    cron_thread.start()
 
     server = HTTPServer(("0.0.0.0", ROUTER_PORT), TenantRouterHandler)
     logger.info(
