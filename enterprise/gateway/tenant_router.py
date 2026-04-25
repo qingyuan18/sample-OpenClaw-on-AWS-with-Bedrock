@@ -637,25 +637,25 @@ def _load_runtime_id_from_ssm():
 
 
 # ---------------------------------------------------------------------------
-# SQS Cron Notification Consumer
-# Polls CronNotifyQueue for messages from microVM cron tasks, then delivers
-# the notification text to the employee's IM channel (DingTalk, etc.).
+# SQS Cron Trigger Consumer
+# Polls CronTriggerQueue for EventBridge Scheduler messages, invokes AgentCore
+# to execute the task, and delivers results to the employee's IM channel.
 # ---------------------------------------------------------------------------
 
-_CRON_NOTIFY_QUEUE_URL = os.environ.get("CRON_NOTIFY_QUEUE_URL", "")
+_CRON_TRIGGER_QUEUE_URL = os.environ.get("CRON_TRIGGER_QUEUE_URL", "")
 
 
-def _load_cron_notify_queue_url():
-    global _CRON_NOTIFY_QUEUE_URL
-    if _CRON_NOTIFY_QUEUE_URL:
+def _load_cron_trigger_queue_url():
+    global _CRON_TRIGGER_QUEUE_URL
+    if _CRON_TRIGGER_QUEUE_URL:
         return
     try:
         ssm = boto3.client("ssm", region_name=AWS_REGION)
-        resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/cron-notify-queue-url")
-        _CRON_NOTIFY_QUEUE_URL = resp["Parameter"]["Value"]
-        logger.info("Cron notify queue URL loaded: %s", _CRON_NOTIFY_QUEUE_URL)
+        resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/cron-trigger-queue-url")
+        _CRON_TRIGGER_QUEUE_URL = resp["Parameter"]["Value"]
+        logger.info("Cron trigger queue URL loaded: %s", _CRON_TRIGGER_QUEUE_URL)
     except Exception as e:
-        logger.warning("Cron notify queue URL not found in SSM: %s", e)
+        logger.warning("Cron trigger queue URL not found in SSM: %s", e)
 
 
 def _resolve_im_channel(emp_id: str) -> dict:
@@ -749,48 +749,71 @@ def _deliver_im_message(channel: str, channel_user_id: str, text: str) -> bool:
         return False
 
 
-def _cron_notify_consumer():
-    """Background thread: poll SQS and deliver cron notifications to IM."""
-    _load_cron_notify_queue_url()
-    if not _CRON_NOTIFY_QUEUE_URL:
-        logger.info("Cron notify consumer disabled (no queue URL)")
+def _cron_trigger_consumer():
+    """Background thread: poll CronTriggerQueue, invoke agentcore, deliver results to IM."""
+    _load_cron_trigger_queue_url()
+    if not _CRON_TRIGGER_QUEUE_URL:
+        logger.info("Cron trigger consumer disabled (no queue URL)")
         return
 
     sqs = boto3.client("sqs", region_name=AWS_REGION)
-    logger.info("Cron notify consumer started, polling %s", _CRON_NOTIFY_QUEUE_URL)
+    logger.info("Cron trigger consumer started, polling %s", _CRON_TRIGGER_QUEUE_URL)
 
     while True:
         try:
             resp = sqs.receive_message(
-                QueueUrl=_CRON_NOTIFY_QUEUE_URL,
-                MaxNumberOfMessages=10,
+                QueueUrl=_CRON_TRIGGER_QUEUE_URL,
+                MaxNumberOfMessages=5,
                 WaitTimeSeconds=20,
+                VisibilityTimeout=360,
             )
             for msg in resp.get("Messages", []):
                 try:
                     body = json.loads(msg["Body"])
                     emp_id = body.get("emp_id", "")
-                    text = body.get("text", "")
-                    preferred_channel = body.get("channel", "")
+                    task_prompt = body.get("task_prompt", "")
+                    channel = body.get("channel", "")
+                    channel_user_id = body.get("channel_user_id", "")
 
-                    if emp_id and text:
-                        im_info = _resolve_im_channel(emp_id)
-                        channel = preferred_channel or im_info.get("channel", "")
-                        channel_uid = im_info.get("channel_user_id", "")
+                    if not emp_id or not task_prompt:
+                        logger.warning("Cron trigger missing emp_id or task_prompt, skipping")
+                        sqs.delete_message(QueueUrl=_CRON_TRIGGER_QUEUE_URL, ReceiptHandle=msg["ReceiptHandle"])
+                        continue
 
-                        if channel and channel_uid:
-                            _deliver_im_message(channel, channel_uid, text)
+                    tenant_id = derive_tenant_id("emp", emp_id)
+                    logger.info("Cron trigger: invoking agentcore for %s (tenant=%s)", emp_id, tenant_id)
+
+                    try:
+                        result = invoke_agent_runtime(
+                            tenant_id=tenant_id,
+                            message=task_prompt,
+                        )
+                        response_text = ""
+                        if isinstance(result, dict):
+                            response_text = result.get("response", result.get("text", str(result)))
                         else:
-                            logger.warning("No IM channel found for %s, dropping cron notification", emp_id)
+                            response_text = str(result)
 
-                    sqs.delete_message(
-                        QueueUrl=_CRON_NOTIFY_QUEUE_URL,
-                        ReceiptHandle=msg["ReceiptHandle"],
-                    )
+                        if channel and channel_user_id and response_text:
+                            _deliver_im_message(channel, channel_user_id, f"[定时任务] {response_text}")
+                            logger.info("Cron result delivered to %s/%s for %s", channel, channel_user_id, emp_id)
+                        elif not channel or not channel_user_id:
+                            im_info = _resolve_im_channel(emp_id)
+                            ch = im_info.get("channel", "")
+                            uid = im_info.get("channel_user_id", "")
+                            if ch and uid and response_text:
+                                _deliver_im_message(ch, uid, f"[定时任务] {response_text}")
+                                logger.info("Cron result delivered (fallback) to %s/%s for %s", ch, uid, emp_id)
+                            else:
+                                logger.warning("No IM channel for %s, cron result dropped", emp_id)
+                    except Exception as e:
+                        logger.error("Cron agentcore invocation failed for %s: %s", emp_id, e)
+
+                    sqs.delete_message(QueueUrl=_CRON_TRIGGER_QUEUE_URL, ReceiptHandle=msg["ReceiptHandle"])
                 except Exception as e:
-                    logger.error("Cron notify message processing failed: %s", e)
+                    logger.error("Cron trigger message processing failed: %s", e)
         except Exception as e:
-            logger.error("SQS poll error: %s", e)
+            logger.error("Cron trigger SQS poll error: %s", e)
             time.sleep(10)
 
 
@@ -804,8 +827,8 @@ def main():
             STACK_NAME,
         )
 
-    # Start SQS cron notification consumer in background
-    cron_thread = threading.Thread(target=_cron_notify_consumer, daemon=True, name="cron-notify")
+    # Start SQS cron trigger consumer in background
+    cron_thread = threading.Thread(target=_cron_trigger_consumer, daemon=True, name="cron-trigger")
     cron_thread.start()
 
     server = HTTPServer(("0.0.0.0", ROUTER_PORT), TenantRouterHandler)

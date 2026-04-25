@@ -417,18 +417,18 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:dynamodb:*:${AWS::AccountId}:table/${AWS::StackName}"
                   - !Sub "arn:aws:dynamodb:*:${AWS::AccountId}:table/${AWS::StackName}/index/*"
-        - PolicyName: SQSCronNotifyPolicy
+        - PolicyName: SQSCronTriggerPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Sid: SQSCronNotifyConsume
+              - Sid: SQSCronTriggerConsume
                 Effect: Allow
                 Action:
                   - sqs:ReceiveMessage
                   - sqs:DeleteMessage
                   - sqs:GetQueueUrl
                   - sqs:GetQueueAttributes
-                Resource: !GetAtt CronNotifyQueue.Arn
+                Resource: !GetAtt CronTriggerQueue.Arn
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-instance-role"
@@ -523,11 +523,20 @@ Resources:
                 Resource:
                   - !GetAtt TenantWorkspaceBucket.Arn
                   - !Sub "${TenantWorkspaceBucket.Arn}/*"
-              - Sid: SQSCronNotify
+              - Sid: EventBridgeSchedulerManage
                 Effect: Allow
                 Action:
-                  - sqs:SendMessage
-                Resource: !GetAtt CronNotifyQueue.Arn
+                  - scheduler:CreateSchedule
+                  - scheduler:DeleteSchedule
+                  - scheduler:GetSchedule
+                  - scheduler:ListSchedules
+                  - scheduler:UpdateSchedule
+                Resource: !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${AWS::StackName}-cron/*"
+              - Sid: EventBridgePassRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt CronSchedulerRole.Arn
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-agentcore-execution-role"
@@ -536,20 +545,60 @@ Resources:
         - Key: Feature
           Value: multitenancy
 
-  # ==================== SQS — Cron Notification Queue ====================
-  # microVM cron tasks send notification messages here; EC2 tenant_router polls
-  # and delivers to IM channels (DingTalk, Discord, Telegram, etc.)
-  CronNotifyQueue:
+  # ==================== SQS — Cron Trigger Queue ====================
+  # EventBridge Scheduler sends trigger messages here; EC2 tenant_router polls,
+  # invokes agentcore to execute the task, and delivers results to IM channels.
+  CronTriggerQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: !Sub "${AWS::StackName}-cron-notify"
-      VisibilityTimeout: 60
+      QueueName: !Sub "${AWS::StackName}-cron-trigger"
+      VisibilityTimeout: 360
       MessageRetentionPeriod: 86400
       Tags:
         - Key: Project
           Value: openclaw
         - Key: Feature
-          Value: cron-notify
+          Value: cron-trigger
+
+  # ==================== EventBridge Scheduler ====================
+  CronSchedulerGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+    Properties:
+      Name: !Sub "${AWS::StackName}-cron"
+      Tags:
+        - Key: Project
+          Value: openclaw
+        - Key: Feature
+          Value: cron-scheduler
+
+  CronSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-cron-scheduler-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: SQSSendMessage
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt CronTriggerQueue.Arn
+      Tags:
+        - Key: Project
+          Value: openclaw
+        - Key: Feature
+          Value: cron-scheduler
 
   # ==================== Security Group ====================
   OpenClawSecurityGroup:
@@ -676,6 +725,51 @@ Resources:
       Tags:
         Project: openclaw
         Feature: multitenancy
+
+  # ==================== SSM — Cron Scheduler Config ====================
+  CronTriggerQueueUrlParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/openclaw/${AWS::StackName}/cron-trigger-queue-url"
+      Type: String
+      Value: !Ref CronTriggerQueue
+      Description: "SQS Queue URL for EventBridge cron triggers"
+      Tags:
+        Project: openclaw
+        Feature: cron-trigger
+
+  CronTriggerQueueArnParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/openclaw/${AWS::StackName}/cron-trigger-queue-arn"
+      Type: String
+      Value: !GetAtt CronTriggerQueue.Arn
+      Description: "SQS Queue ARN for EventBridge cron triggers"
+      Tags:
+        Project: openclaw
+        Feature: cron-trigger
+
+  CronSchedulerGroupParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/openclaw/${AWS::StackName}/cron-scheduler-group"
+      Type: String
+      Value: !Ref CronSchedulerGroup
+      Description: "EventBridge Scheduler group name"
+      Tags:
+        Project: openclaw
+        Feature: cron-scheduler
+
+  CronSchedulerRoleArnParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/openclaw/${AWS::StackName}/cron-scheduler-role-arn"
+      Type: String
+      Value: !GetAtt CronSchedulerRole.Arn
+      Description: "IAM Role ARN for EventBridge Scheduler"
+      Tags:
+        Project: openclaw
+        Feature: cron-scheduler
 
   # ==================== CloudWatch Log Group ====================
   AgentLogsGroup:
@@ -1318,11 +1412,19 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-AlwaysOnSubnet"
 
-  CronNotifyQueueUrl:
-    Description: "SQS Queue URL for cron notification delivery (microVM → EC2 IM channels)"
-    Value: !Ref CronNotifyQueue
+  CronTriggerQueueUrl:
+    Description: "SQS Queue URL for cron trigger (EventBridge → EC2 tenant_router)"
+    Value: !Ref CronTriggerQueue
     Export:
-      Name: !Sub "${AWS::StackName}-CronNotifyQueueUrl"
+      Name: !Sub "${AWS::StackName}-CronTriggerQueueUrl"
+
+  CronSchedulerGroupName:
+    Description: "EventBridge Scheduler group name for cron schedules"
+    Value: !Ref CronSchedulerGroup
+
+  CronSchedulerRoleArn:
+    Description: "IAM Role ARN for EventBridge Scheduler to send SQS messages"
+    Value: !GetAtt CronSchedulerRole.Arn
 
   MonthlyCost:
     Description: "Estimated monthly cost (USD)"

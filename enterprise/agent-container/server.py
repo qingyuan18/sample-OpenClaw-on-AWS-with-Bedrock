@@ -507,26 +507,6 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
             except Exception as e:
                 logger.warning("SQLite restore failed (non-fatal): %s", e)
 
-        # Restore ~/.openclaw/cron/ from S3 (scheduled/recurring tasks).
-        # OpenClaw's built-in Croner scheduler reads jobs.json from this directory.
-        # Without restoring it, cron jobs created in previous microVM sessions are lost.
-        cron_dir = os.path.expanduser("~/.openclaw/cron")
-        cron_s3 = f"{s3_base}/openclaw-cron/"
-        os.makedirs(cron_dir, exist_ok=True)
-        try:
-            result = subprocess.run(
-                ["aws", "s3", "sync", cron_s3, cron_dir + "/", "--quiet"],
-                capture_output=True, text=True, timeout=15,
-            )
-            if result.returncode == 0:
-                jobs_file = os.path.join(cron_dir, "jobs.json")
-                if os.path.isfile(jobs_file):
-                    logger.info("Restored cron/jobs.json from S3 for %s", base_id)
-                else:
-                    logger.info("No cron data in S3 for %s (first run)", base_id)
-        except Exception as e:
-            logger.warning("Cron restore failed (non-fatal): %s", e)
-
         # Synthesize MEMORY.md from daily memory files if it's empty.
         # In serverless AgentCore microVMs, the OpenClaw Gateway compaction daemon
         # never runs persistently, so MEMORY.md stays at "# Memory" (9 bytes) forever.
@@ -772,28 +752,39 @@ def _ensure_workspace_assembled(tenant_id: str) -> None:
             except Exception as e:
                 logger.warning("Gateway workspace mirror failed (non-fatal): %s", e)
 
-        # Inject cron notification instruction — tells the agent to POST results
-        # to /cron-notify after every scheduled/cron task so they reach IM channels.
+        # Inject cron schedule instruction — tells the agent to manage scheduled
+        # tasks via EventBridge Scheduler endpoints instead of local Croner.
         try:
             soul_path = os.path.join(WORKSPACE, "SOUL.md")
             if os.path.isfile(soul_path):
                 cron_block = (
-                    "\n\n<!-- CRON NOTIFICATION -->\n"
-                    "## 定时任务结果通知\n"
-                    "当你执行定时任务（scheduled task / cron job）后，**必须**在任务完成后执行以下 shell 命令，"
-                    "将结果发送给用户的 IM 频道（钉钉/飞书/Discord等）：\n"
+                    "\n\n<!-- CRON SCHEDULE -->\n"
+                    "## 定时任务管理\n"
+                    "当用户要求创建定时/周期任务时，使用以下 API 管理（**不要**使用 openclaw 内置的 cron 功能）：\n\n"
+                    "### 创建定时任务\n"
                     "```bash\n"
-                    f'curl -s -X POST http://localhost:8080/cron-notify -H "Content-Type: application/json" '
-                    f'-d \'{{"emp_id": "{base_id}", "text": "<你的任务结果摘要>"}}\'\n'
+                    f'curl -s -X POST http://localhost:8080/cron-schedule -H "Content-Type: application/json" '
+                    f'-d \'{{"emp_id": "{base_id}", "cron_expr": "0 9 * * *", '
+                    f'"task_prompt": "具体任务描述", "timezone": "Asia/Shanghai"}}\'\n'
                     "```\n"
-                    "将 `<你的任务结果摘要>` 替换为你执行完定时任务后的结果概要。"
-                    "这是唯一能让用户在 IM 上收到定时任务通知的方式，**请务必执行**。\n"
+                    "- `cron_expr`: 标准 5 位 cron 表达式（分 时 日 月 星期），例如 `0 9 * * *` 表示每天9点\n"
+                    "- `task_prompt`: 定时执行时发送给你的消息，要包含完整的任务描述\n"
+                    "- `timezone`: 用户所在时区，默认 Asia/Shanghai\n\n"
+                    "### 查看定时任务\n"
+                    "```bash\n"
+                    f'curl -s http://localhost:8080/cron-list?emp_id={base_id}\n'
+                    "```\n\n"
+                    "### 删除定时任务\n"
+                    "```bash\n"
+                    f'curl -s -X POST http://localhost:8080/cron-delete -H "Content-Type: application/json" '
+                    f'-d \'{{"emp_id": "{base_id}", "schedule_name": "<从 cron-list 获取的 name>"}}\'\n'
+                    "```\n"
                 )
                 with open(soul_path, "a") as f:
                     f.write(cron_block)
-                logger.info("Cron notify instruction injected into SOUL.md for %s", base_id)
+                logger.info("Cron schedule instruction injected into SOUL.md for %s", base_id)
         except Exception as e:
-            logger.warning("Cron notify SOUL injection failed (non-fatal): %s", e)
+            logger.warning("Cron schedule SOUL injection failed (non-fatal): %s", e)
 
         # Write SOUL hash + config version to DynamoDB SESSION# for admin monitoring.
         # Admin Console can display this to verify the agent is running the correct config.
@@ -907,15 +898,6 @@ def _sync_heartbeat_and_memory(base_id: str) -> None:
                 capture_output=True, text=True, timeout=15,
             )
             logger.info(".memory-index.sqlite synced to S3 for %s", base_id)
-        # Sync ~/.openclaw/cron/ (Croner scheduled tasks: jobs.json, jobs-state.json)
-        cron_dir = os.path.expanduser("~/.openclaw/cron")
-        if os.path.isdir(cron_dir) and os.listdir(cron_dir):
-            cron_s3 = f"s3://{S3_BUCKET}/{base_id}/openclaw-cron/"
-            subprocess.run(
-                ["aws", "s3", "sync", cron_dir + "/", cron_s3, "--quiet"],
-                capture_output=True, text=True, timeout=15,
-            )
-            logger.info("cron/ synced to S3 for %s", base_id)
     except Exception as e:
         logger.warning("Post-invocation S3 sync failed (non-fatal): %s", e)
 
@@ -1167,6 +1149,8 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/ping":
             self._respond(200, {"status": "Healthy", "time_of_last_update": int(time.time())})
+        elif self.path.startswith("/cron-list"):
+            self._handle_cron_list()
         elif self.path == "/gateway-dashboard":
             self._handle_gateway_dashboard()
         elif self.path == "/gateway-approve-pairing":
@@ -1240,8 +1224,11 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
             self._respond(500, {"error": str(e)})
 
     def do_POST(self):
-        if self.path == "/cron-notify":
-            self._handle_cron_notify()
+        if self.path == "/cron-schedule":
+            self._handle_cron_schedule()
+            return
+        if self.path == "/cron-delete":
+            self._handle_cron_delete()
             return
         if self.path != "/invocations":
             self._respond(404, {"error": "not found"})
@@ -1426,8 +1413,36 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
             logger.error("Invocation failed tenant_id=%s error=%s", tenant_id, e)
             self._respond(500, {"error": str(e)})
 
-    def _handle_cron_notify(self):
-        """Send a cron task result to SQS for IM delivery on EC2."""
+    def _get_scheduler_client(self):
+        import boto3 as _b3_sched
+        return _b3_sched.client("scheduler", region_name=AWS_REGION_RUNTIME)
+
+    def _get_scheduler_config(self):
+        """Resolve scheduler group name, target queue ARN, and role ARN from env/SSM."""
+        group = os.environ.get("CRON_SCHEDULER_GROUP", "")
+        queue_arn = os.environ.get("CRON_TRIGGER_QUEUE_ARN", "")
+        role_arn = os.environ.get("CRON_SCHEDULER_ROLE_ARN", "")
+        if group and queue_arn and role_arn:
+            return group, queue_arn, role_arn
+        try:
+            import boto3 as _b3_ssm
+            ssm = _b3_ssm.client("ssm", region_name=AWS_REGION_RUNTIME)
+            prefix = f"/openclaw/{STACK_NAME}"
+            if not group:
+                group = ssm.get_parameter(Name=f"{prefix}/cron-scheduler-group")["Parameter"]["Value"]
+                os.environ["CRON_SCHEDULER_GROUP"] = group
+            if not queue_arn:
+                queue_arn = ssm.get_parameter(Name=f"{prefix}/cron-trigger-queue-arn")["Parameter"]["Value"]
+                os.environ["CRON_TRIGGER_QUEUE_ARN"] = queue_arn
+            if not role_arn:
+                role_arn = ssm.get_parameter(Name=f"{prefix}/cron-scheduler-role-arn")["Parameter"]["Value"]
+                os.environ["CRON_SCHEDULER_ROLE_ARN"] = role_arn
+        except Exception as e:
+            logger.warning("Cannot resolve scheduler config from SSM: %s", e)
+        return group, queue_arn, role_arn
+
+    def _handle_cron_schedule(self):
+        """Create an EventBridge Schedule for a recurring task."""
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         try:
             payload = json.loads(body) if body else {}
@@ -1436,38 +1451,145 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
             return
 
         emp_id = payload.get("emp_id", "")
-        text = payload.get("text", "")
-        if not emp_id or not text:
-            self._respond(400, {"error": "emp_id and text required"})
+        cron_expr = payload.get("cron_expr", "")
+        task_prompt = payload.get("task_prompt", "")
+        timezone = payload.get("timezone", "Asia/Shanghai")
+
+        if not emp_id or not cron_expr or not task_prompt:
+            self._respond(400, {"error": "emp_id, cron_expr, and task_prompt required"})
             return
 
-        queue_url = os.environ.get("CRON_NOTIFY_QUEUE_URL", "")
-        if not queue_url:
+        # Resolve the creating channel from payload or DynamoDB MAPPING.
+        # The caller (agent) may pass channel/channel_user_id explicitly;
+        # otherwise we look up the employee's IM binding in DynamoDB.
+        channel = payload.get("channel", "")
+        channel_user_id = payload.get("channel_user_id", "")
+        if not channel or not channel_user_id:
             try:
-                import boto3 as _b3_sqs
-                ssm = _b3_sqs.client("ssm", region_name=AWS_REGION_RUNTIME)
-                resp = ssm.get_parameter(Name=f"/openclaw/{STACK_NAME}/cron-notify-queue-url")
-                queue_url = resp["Parameter"]["Value"]
-                os.environ["CRON_NOTIFY_QUEUE_URL"] = queue_url
+                import boto3 as _b3_map
+                ddb = _b3_map.resource("dynamodb", region_name=DYNAMODB_REGION)
+                table = ddb.Table(DYNAMODB_TABLE)
+                resp = table.query(
+                    KeyConditionExpression=_b3_map.dynamodb.conditions.Key("PK").eq("ORG#acme")
+                    & _b3_map.dynamodb.conditions.Key("SK").begins_with("MAPPING#"),
+                    FilterExpression=_b3_map.dynamodb.conditions.Attr("employeeId").eq(emp_id),
+                    Limit=10,
+                )
+                for item in resp.get("Items", []):
+                    sk = item.get("SK", "").replace("MAPPING#", "")
+                    uid = item.get("channelUserId", "")
+                    if sk and uid:
+                        parts = sk.split("__")
+                        channel = channel or parts[0]
+                        channel_user_id = channel_user_id or uid
+                        break
             except Exception as e:
-                logger.warning("Cannot resolve cron-notify queue URL: %s", e)
-                self._respond(503, {"error": "SQS queue URL not configured"})
-                return
+                logger.warning("MAPPING lookup for %s failed: %s", emp_id, e)
+
+        group, queue_arn, role_arn = self._get_scheduler_config()
+        if not group or not queue_arn or not role_arn:
+            self._respond(503, {"error": "EventBridge Scheduler not configured"})
+            return
+
+        import hashlib as _hl
+        task_hash = _hl.sha256(f"{emp_id}:{task_prompt}".encode()).hexdigest()[:8]
+        schedule_name = f"{emp_id}-{task_hash}"
 
         try:
-            import boto3 as _b3_sqs2
-            sqs = _b3_sqs2.client("sqs", region_name=AWS_REGION_RUNTIME)
-            msg = json.dumps({
-                "emp_id": emp_id,
-                "text": text,
-                "channel": payload.get("channel", ""),
-                "ts": time.time(),
+            scheduler = self._get_scheduler_client()
+            scheduler.create_schedule(
+                GroupName=group,
+                Name=schedule_name,
+                ScheduleExpression=f"cron({cron_expr})",
+                ScheduleExpressionTimezone=timezone,
+                FlexibleTimeWindow={"Mode": "OFF"},
+                Target={
+                    "Arn": queue_arn,
+                    "RoleArn": role_arn,
+                    "Input": json.dumps({
+                        "emp_id": emp_id,
+                        "task_prompt": task_prompt,
+                        "channel": channel,
+                        "channel_user_id": channel_user_id,
+                    }),
+                },
+                State="ENABLED",
+            )
+            logger.info("Created schedule %s/%s for %s", group, schedule_name, emp_id)
+            self._respond(200, {
+                "status": "created",
+                "schedule_name": schedule_name,
+                "cron_expr": cron_expr,
+                "timezone": timezone,
             })
-            sqs.send_message(QueueUrl=queue_url, MessageBody=msg)
-            logger.info("Cron notify sent to SQS for %s", emp_id)
-            self._respond(200, {"status": "queued"})
         except Exception as e:
-            logger.error("SQS send failed: %s", e)
+            logger.error("EventBridge create_schedule failed: %s", e)
+            self._respond(500, {"error": str(e)})
+
+    def _handle_cron_delete(self):
+        """Delete an EventBridge Schedule."""
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        try:
+            payload = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            self._respond(400, {"error": "invalid json"})
+            return
+
+        emp_id = payload.get("emp_id", "")
+        schedule_name = payload.get("schedule_name", "")
+        if not emp_id or not schedule_name:
+            self._respond(400, {"error": "emp_id and schedule_name required"})
+            return
+
+        if not schedule_name.startswith(emp_id):
+            self._respond(403, {"error": "cannot delete schedules owned by other employees"})
+            return
+
+        group, _, _ = self._get_scheduler_config()
+        if not group:
+            self._respond(503, {"error": "EventBridge Scheduler not configured"})
+            return
+
+        try:
+            scheduler = self._get_scheduler_client()
+            scheduler.delete_schedule(GroupName=group, Name=schedule_name)
+            logger.info("Deleted schedule %s/%s for %s", group, schedule_name, emp_id)
+            self._respond(200, {"status": "deleted", "schedule_name": schedule_name})
+        except Exception as e:
+            logger.error("EventBridge delete_schedule failed: %s", e)
+            self._respond(500, {"error": str(e)})
+
+    def _handle_cron_list(self):
+        """List EventBridge Schedules for an employee."""
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        emp_id = qs.get("emp_id", [""])[0]
+        if not emp_id:
+            self._respond(400, {"error": "emp_id query param required"})
+            return
+
+        group, _, _ = self._get_scheduler_config()
+        if not group:
+            self._respond(503, {"error": "EventBridge Scheduler not configured"})
+            return
+
+        try:
+            scheduler = self._get_scheduler_client()
+            resp = scheduler.list_schedules(
+                GroupName=group,
+                NamePrefix=f"{emp_id}-",
+                MaxResults=50,
+            )
+            schedules = []
+            for s in resp.get("Schedules", []):
+                schedules.append({
+                    "name": s.get("Name", ""),
+                    "schedule_expression": s.get("ScheduleExpression", ""),
+                    "state": s.get("State", ""),
+                })
+            self._respond(200, {"schedules": schedules})
+        except Exception as e:
+            logger.error("EventBridge list_schedules failed: %s", e)
             self._respond(500, {"error": str(e)})
 
     def _respond(self, status: int, body: dict):
