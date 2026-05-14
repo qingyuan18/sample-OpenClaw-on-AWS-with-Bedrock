@@ -529,9 +529,13 @@ Resources:
                   - scheduler:CreateSchedule
                   - scheduler:DeleteSchedule
                   - scheduler:GetSchedule
-                  - scheduler:ListSchedules
                   - scheduler:UpdateSchedule
                 Resource: !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${AWS::StackName}-cron/*"
+              - Sid: EventBridgeSchedulerList
+                Effect: Allow
+                Action:
+                  - scheduler:ListSchedules
+                Resource: "*"
               - Sid: EventBridgePassRole
                 Effect: Allow
                 Action:

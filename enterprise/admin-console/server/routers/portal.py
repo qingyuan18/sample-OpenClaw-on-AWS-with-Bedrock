@@ -581,7 +581,10 @@ def portal_usage(authorization: str = Header(default="")):
     emp = next((e for e in db.get_employees() if e["id"] == user.employee_id), None)
     agent_id = emp.get("agentId", "") if emp else ""
 
+    # Try agentId first, fall back to employeeId (server.py writes USAGE with emp_id as key)
     usage_records = db.get_usage_for_agent(agent_id) if agent_id else []
+    if not usage_records:
+        usage_records = db.get_usage_for_agent(user.employee_id)
     total_input = sum(u.get("inputTokens", 0) for u in usage_records)
     total_output = sum(u.get("outputTokens", 0) for u in usage_records)
     total_requests = sum(u.get("requests", 0) for u in usage_records)

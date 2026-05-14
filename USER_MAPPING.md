@@ -66,6 +66,46 @@ aws dynamodb get-item \
 
 确认返回的 `role` 为 `admin` 后，该用户即拥有管理员权限。创建员工后，还需要添加渠道用户映射（见下一节）才能通过 IM 渠道与 Bot 对话。
 
+## 配置 IM Channel（飞书 / Discord）
+
+Channel 配置通过 EC2 上的 OpenClaw CLI 完成，需 SSM 登录到 Gateway 实例操作。
+
+### 飞书 (Feishu)
+
+```bash
+# 启用飞书插件
+openclaw plugins enable feishu
+
+# 配置飞书 Bot 凭证（从飞书开放平台获取）
+openclaw config set channels.feishu.appId <YOUR_APP_ID>
+openclaw config set channels.feishu.appSecret <YOUR_APP_SECRET>
+
+# 重启 Gateway 生效
+XDG_RUNTIME_DIR=/run/user/1000 systemctl --user restart openclaw-gateway.service
+
+# 验证
+openclaw channels list
+# 应显示：feishu │ ON │ OK │ configured
+```
+
+> **注意：** Channel ID 是 `feishu`，不是 `openclaw-feishu`。社区 npm 包 `openclaw-feishu` 与 `openclaw-agentcore` 的插件系统不兼容。
+
+### Discord
+
+```bash
+# 配置 Discord Bot Token（从 Discord Developer Portal 获取）
+openclaw config set channels.discord.botToken <YOUR_BOT_TOKEN>
+
+# 重启 Gateway 生效
+XDG_RUNTIME_DIR=/run/user/1000 systemctl --user restart openclaw-gateway.service
+
+# 验证
+openclaw channels list
+# 应显示：discord │ ON │ OK │ configured
+```
+
+> **Discord Bot 权限要求：** 在 Discord Developer Portal 中需启用 Message Content Intent，并添加 `bot` scope 和 `Send Messages`、`Read Message History` 权限。
+
 ## 手动添加渠道用户映射（跳过扫码配对）
 
 在 Admin Console 或通过上述方式创建员工后，默认需要员工在 IM 渠道中扫码完成自助配对。如果希望跳过扫码步骤，可以直接在 DynamoDB 中写入映射记录。
