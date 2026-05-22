@@ -129,39 +129,55 @@ openclaw channels list
 
 映射记录的 Key 格式为 `MAPPING#{channel}__{userId}`，其中 `channel` 为渠道标识（如 `feishu`、`discord`、`telegram`、`slack`、`wechat`）。
 
-使用 AWS CLI 写入示例：
+使用 AWS CLI 写入示例（注意 DynamoDB 部署在 `us-east-2`，且需要复合主键 `PK + SK`）：
 
 ```bash
 # 飞书用户映射
 aws dynamodb put-item \
   --table-name openclaw-enterprise \
+  --region us-east-2 \
   --item '{
-    "PK": {"S": "MAPPING#feishu__ou_xxxxxxxxxxxx"},
-    "employeeId": {"S": "emp-001"}
+    "PK": {"S": "ORG#acme"},
+    "SK": {"S": "MAPPING#feishu__ou_xxxxxxxxxxxx"},
+    "employeeId": {"S": "emp-001"},
+    "channel": {"S": "feishu"},
+    "channelUserId": {"S": "ou_xxxxxxxxxxxx"}
   }'
 
 # Discord 用户映射
 aws dynamodb put-item \
   --table-name openclaw-enterprise \
+  --region us-east-2 \
   --item '{
-    "PK": {"S": "MAPPING#discord__123456789012345678"},
-    "employeeId": {"S": "emp-001"}
+    "PK": {"S": "ORG#acme"},
+    "SK": {"S": "MAPPING#discord__123456789012345678"},
+    "employeeId": {"S": "emp-001"},
+    "channel": {"S": "discord"},
+    "channelUserId": {"S": "123456789012345678"}
   }'
 
 # Telegram 用户映射
 aws dynamodb put-item \
   --table-name openclaw-enterprise \
+  --region us-east-2 \
   --item '{
-    "PK": {"S": "MAPPING#telegram__987654321"},
-    "employeeId": {"S": "emp-001"}
+    "PK": {"S": "ORG#acme"},
+    "SK": {"S": "MAPPING#telegram__987654321"},
+    "employeeId": {"S": "emp-001"},
+    "channel": {"S": "telegram"},
+    "channelUserId": {"S": "987654321"}
   }'
 
 # Slack 用户映射
 aws dynamodb put-item \
   --table-name openclaw-enterprise \
+  --region us-east-2 \
   --item '{
-    "PK": {"S": "MAPPING#slack__U04ABCDEF12"},
-    "employeeId": {"S": "emp-001"}
+    "PK": {"S": "ORG#acme"},
+    "SK": {"S": "MAPPING#slack__U04ABCDEF12"},
+    "employeeId": {"S": "emp-001"},
+    "channel": {"S": "slack"},
+    "channelUserId": {"S": "U04ABCDEF12"}
   }'
 ```
 
@@ -173,7 +189,8 @@ aws dynamodb put-item \
 # 查询某个渠道用户的映射是否生效
 aws dynamodb get-item \
   --table-name openclaw-enterprise \
-  --key '{"PK": {"S": "MAPPING#feishu__ou_xxxxxxxxxxxx"}}'
+  --region us-east-2 \
+  --key '{"PK": {"S": "ORG#acme"}, "SK": {"S": "MAPPING#feishu__ou_xxxxxxxxxxxx"}}'
 ```
 
 确认返回的 `employeeId` 正确后，该用户即可通过对应 IM 渠道直接与 Bot 对话，无需扫码配对。

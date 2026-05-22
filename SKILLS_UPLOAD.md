@@ -217,53 +217,12 @@ aws s3 sync ./web-scraper/ s3://openclaw-tenants-687912291502/_shared/skills/web
 
 ## 快速脚本：批量转换 + 上传
 
-```bash
-#!/bin/bash
-# convert-and-upload.sh <skill-dir> [allowedRoles]
-# 用法: ./convert-and-upload.sh ./my-skill "engineering,sales"
-
-SKILL_DIR="$1"
-ROLES="${2:-*}"
-BUCKET="openclaw-tenants-687912291502"
-SKILL_NAME=$(basename "$SKILL_DIR")
-
-# 生成 skill.json（如果不存在）
-if [ ! -f "$SKILL_DIR/skill.json" ]; then
-  DESC=""
-  if [ -f "$SKILL_DIR/SKILL.md" ]; then
-    DESC=$(grep "^description:" "$SKILL_DIR/SKILL.md" | head -1 | sed 's/description: *//')
-  fi
-  DESC="${DESC:-A converted Claude skill}"
-
-  IFS=',' read -ra ROLE_ARRAY <<< "$ROLES"
-  ROLES_JSON=$(printf ',{"S":"%s"}' "${ROLE_ARRAY[@]}")
-  ROLES_JSON="[${ROLES_JSON:1}]"
-
-  cat > "$SKILL_DIR/skill.json" << EOF
-{
-  "name": "${SKILL_NAME}",
-  "version": "1.0.0",
-  "description": "${DESC}",
-  "author": "Converted",
-  "layer": 2,
-  "category": "productivity",
-  "scope": "department",
-  "requires": {"env": [], "tools": []},
-  "permissions": {"allowedRoles": $(echo "$ROLES" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip().split(',')))"), "blockedRoles": []}
-}
-EOF
-  echo "Generated skill.json for ${SKILL_NAME}"
-fi
-
-# 上传
-aws s3 sync "$SKILL_DIR/" "s3://${BUCKET}/_shared/skills/${SKILL_NAME}/" --region us-east-1
-echo "Uploaded ${SKILL_NAME} to S3"
-```
-
-使用方式：
+仓库已提供独立脚本 [scripts/convert-and-upload.sh](scripts/convert-and-upload.sh)，会自动生成 `skill.json`（如果缺失）并同步到 S3。
 
 ```bash
-chmod +x convert-and-upload.sh
-./convert-and-upload.sh ./my-skill "engineering,sales"
-./convert-and-upload.sh ./another-skill "*"  # 全员可用
+./scripts/convert-and-upload.sh ./my-skill "engineering,sales"
+./scripts/convert-and-upload.sh ./another-skill "*"   # 全员可用
+
+# 自定义 bucket / region
+BUCKET=my-bucket REGION=us-west-2 ./scripts/convert-and-upload.sh ./my-skill "*"
 ```
